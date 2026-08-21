@@ -1,0 +1,19 @@
+---
+status: active
+project: meta
+type: index
+---
+# Resources
+
+Cross-project reference material, templates, and Jobs that don't belong to a single project.
+
+## Notes in this folder
+
+- [[Jarvis on Claude Mobile App]] — how to set up a claude.ai Project to talk to Jarvis when away from this machine (advice-only, no hands).
+- [[barehands]] — hand-tracked webcam gesture UI (jaredrhod/barehands), cloned to `~/barehands`, how to run it and wire it in.
+- [[Fullstack Agent Stack]] — the jaredrhod/fullstack-agent installer and its five component repos, version/update tracking, and which pieces are actually active vs. dormant clones.
+- [[Public ESPN API]] — reference doc for ESPN's public API (no key needed), for pulling sports data. Saved, nothing built against it yet.
+- [[voice-line]] — local voice interface (whisper + Kokoro TTS + warm Claude session) that barehands relays to for voice; how to start the three-service stack and drive it.
+- [[Jarvis Remote Control]] — how Adam reaches the real, full-tool Jarvis session from his phone (Claude Code's native Remote Control), plus the lid-close power fix so it survives closing the laptop.
+- [[Base44 Apps]] — full inventory of Adam's 92 Base44 apps, categorized by theme; only [[Elijah Learning Academy]] and [[Juvenile Virtue]] explored in depth so far.
+- [[Marketing]] — Jared Rhodenizer's marketing playbook (principles, funnel strategy, copywriting/email/ads/lead-magnet/content/analytics playbooks); read before any marketing work. Also live as a Claude Code skill at `~/.claude/skills/jaredrhod-marketing/`.
