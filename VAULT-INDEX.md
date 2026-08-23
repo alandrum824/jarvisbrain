@@ -39,6 +39,10 @@ I trade forex using MetaTrader 5 and TradingView. My trading is handled by an EA
 
 All open work lives in one note: [[Active Priorities]]. Tag each item with its project where it isn't obvious. Check it at the start of every conversation; verify an item's real state before acting on it (a listed item may already be done).
 
+## Key People
+
+- **Mom, Laura Speer** — born May 27, 1963, based in Fort Worth, TX. Resells women's clothing on eBay, store `ebay.com/str/emarketingtx` — sales dried up, she's considering shutting it down; real goal is clearing house space, not growth. See [[Mom's eBay Store (EMarketingTX)]]. Also starting a separate print-on-demand store with Adam — see [[Automated POD Stores (Adam and Mom)]].
+
 ## Personal Interests
 
 - Married; wedding anniversary is August 24 (17th anniversary in 2026, celebrated a day early on the 23rd that year).

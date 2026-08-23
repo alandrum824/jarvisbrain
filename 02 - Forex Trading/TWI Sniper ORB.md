@@ -77,6 +77,25 @@ Three named sessions — **Asia, London, New York** — each with its own enable
 - **Trade management**: move to break-even at 1R (configurable), optional partial close at target R (off per the loaded `.set` file), trail by pip distance after BE.
 - **Guardrails**: max trades per session/day (asset-profile-specific), max daily loss/profit in $, max spread (asset-profile-specific — the exact thing that was just fixed), Friday-close cutoff.
 
+## Backtest results (2026-08-21, Jarvis + Adam)
+
+Compiled EA is `TWIORB24.ex5`, running on the RisenAdam MT5 terminal. Adam ran two Strategy Tester passes on XAUUSD, M5:
+
+**Pass 1 — default inputs, no `.set` loaded, Jan–Aug 2026, $10,000 test balance.** Stopped early by Adam. Default `InpLotMode = LOT_RISK_PERCENT` at 3.0% risk produced **20–35 lot orders** — constant `[No money]`/`[Market closed]` rejections. Confirms the same failure mode already seen on the live $391 account with a different config (1.58-lot rejection): **risk-percent lot mode on this EA scales to dangerous sizes unless a fixed-lots `.set` file is loaded.** Do not run this EA on any real account with default inputs — always load a `.set` with `InpLotMode = LOT_FIXED` and a sane `InpFixedLots` first.
+
+**Pass 2 — `.set` loaded (fixed 0.20 lots, matching the `twiprofitorb.set` provenance noted below), Aug 1–20 2026, $10,000 test balance.** Completed clean. Verified directly from the tester's own log (`Tester/logs/20260821.log`), trade-by-trade, cross-checked against the reported final balance:
+
+| | |
+|---|---|
+| Trades | 24 (all closed via trailing stop, none hit raw TP or original SL) |
+| Wins / Losses | 12 / 12 — **50% win rate** |
+| Gross win / loss | +105.29 pts / −100.97 pts |
+| Net | **+4.32 pts ≈ +$86.40 on 0.2 lots** (10000.00 → 10086.40) |
+| Profit factor | ≈1.04 — thin, close to breakeven |
+| Every entry mode seen | `ENTRY_BREAK` (immediate market order on M5 close beyond the range) — this is the **default** `InpEntryMode`, not the sniper-retrace mode the EA is named for |
+
+**Read of this result:** a real but very thin edge over a 3-week window at 24 trades — not enough sample size to call it validated, and every single exit was the trailing stop doing the work (locking in partial gains on winners, cutting losses on losers) rather than the raw TP/SL ever being hit outright. Worth a longer/larger-sample backtest (the Jan–Aug range, properly, with fixed lots this time) before trusting this on the live account beyond the current 0.01-lot size. Trailing-stop and BE-move logic (`g_trail`, `InpBETriggerR`) is clearly doing most of the risk management here — worth understanding before scaling size up.
+
 ## Full source (v2.61, as maintained 2026-08-20)
 ```mql5
 //+------------------------------------------------------------------+

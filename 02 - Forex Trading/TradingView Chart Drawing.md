@@ -7,6 +7,20 @@ type: reference
 
 How to read and draw on Adam's live TradingView chart, reliably and fast. Discovered the hard way starting 2026-08-17 — read this before improvising, so the discovery tax never gets paid twice.
 
+## This machine (2026-08-21) — tradingview-mcp NOW INSTALLED, pending restart
+**Update, later same session:** `tradingview-mcp` is now installed on this machine too — cloned to `C:\Users\Administrator\tradingview-mcp`, `npm install` clean (7 npm-audit vulnerabilities reported, not addressed), wired into `C:\Users\Administrator\.mcp.json` as the `tradingview` server using system Node (`C:\Program Files\nodejs\node.exe` — v24.19.0, system-wide here, unlike the desk machine's portable extract). `src/server.js` passed `node --check`. **Not yet verified live — needs a Claude Code restart before the MCP tools load**; run `tv_health_check` first thing after restarting.
+
+**Why it got installed here (important, cost real risk):** attempted to edit the live [[Malaysian SNR x Orderflow]] script through raw CDP and hit two hard blockers that make raw CDP unsafe for ANY Pine editing:
+1. **The Pine editor opens on a blank default slot**, not the script you want — clicking `[data-name=pine-dialog-button]` opened `indicator("My script") / plot(close)`, not MSNR. Injecting and saving there is exactly the documented overwrite trap that already destroyed TWI True North's slot once.
+2. **The editor DOM is virtualized** — scraping `.cm-content` innerText returns only the *currently visible* lines, not the full source. A partial read, modified and saved back, would truncate and destroy a long script. This is a silent, total-loss failure mode.
+
+**Standing rule: never edit Pine via raw CDP.** Reading/navigating/screenshotting over CDP is fine and proven; Pine source editing requires `tradingview-mcp`'s `pine_open`/`pine_get_source`/`pine_save` (full-source via the app's own API) plus the make-a-copy-then-verify-script-count flow documented in [[Malaysian SNR x Orderflow]].
+
+## Earlier same session — raw CDP connection (still valid for read/navigate/screenshot)
+Transport 0 (`tradingview-mcp`) below is only set up on Adam's main desk machine (`C:\Users\aland\...`) — not installed here. On this box, connected via raw CDP instead (Transport 1): killed running `TradingView.exe`, relaunched with `--remote-debugging-port=9222` from `C:\Program Files\WindowsApps\TradingView.Desktop_3.3.0.7992_x64__n534cwy3pjxzj\` (version folder will drift on updates — glob it fresh each time). Navigated the blank "New tab" page to `https://www.tradingview.com/chart/` and it auto-redirected to the same saved layout (`uJnBMo6l`) as the other machine — same account, cloud-synced layout, already logged in, no auth step needed. Confirmed via screenshot: CADJPY 30m/FXCM, Pafx Secret indicator, "TWI TN" label live on chart.
+
+Helper script rebuilt here since the original was session-scratchpad-only: `C:\Users\Administrator\mt5-bridge\cdp-tv.ps1` (same interface as described below — `-Cmd navigate/eval/screenshot/listtargets`). Consider setting up the real `tradingview-mcp` here too if this becomes a regular workflow on this machine — 84 purpose-built tools beat hand-rolled CDP for anything beyond basic read/navigate/screenshot.
+
 ## Transport 0: tradingview-mcp (installed 2026-08-18 — use this first, once verified)
 A real, purpose-built MCP server that talks to TradingView Desktop over CDP (port 9222) — replaces the hand-rolled pain of Transports 1/2 below. 84 tools: `chart_set_symbol`/`chart_set_timeframe`/`chart_scroll_to_date` for navigation, `draw_shape` (horizontal_line, trend_line, rectangle, text) for markup, `data_get_pine_lines`/`data_get_pine_labels`/`data_get_pine_boxes` for reading custom-indicator output (Adam's Pafx Secret template draws with Pine graphics, invisible to normal data tools — these are the only way to read it programmatically), `capture_screenshot`, `alert_create`, `replay_*` for backtesting, `pine_*` for editing/compiling Pine Script, `tv_health_check` to verify the connection.
 
