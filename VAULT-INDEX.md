@@ -41,6 +41,7 @@ All open work lives in one note: [[Active Priorities]]. Tag each item with its p
 
 ## Personal Interests
 
+- Married; wedding anniversary is August 24 (17th anniversary in 2026, celebrated a day early on the 23rd that year).
 - Building apps with Claude AI.
 - Makes Christian rap and alternative rock music under the artist name **Juvenile Virtue**, on Spotify and Apple Music — see [[Juvenile Virtue]].
 - Sports: 49ers (NFL), Lakers (NBA), Angels (MLB), Ducks (NHL).
