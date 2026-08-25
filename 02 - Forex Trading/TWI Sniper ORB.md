@@ -62,7 +62,7 @@ Grok's build added real visibility that v2.10 didn't have:
 Three named sessions — **Asia, London, New York** — each with its own enable toggle and start/end hours (broker server time), plus `InpSessionPreset` to quickly restrict to just one (or leave on "All" to trade all three). Defaults: Asia 00:00–04:00, London 08:00–12:00, New York 13:30–17:00 — these are placeholders, **verify against Adam's actual broker's server time before running live.**
 
 ## Status
-**v2.61, `TWIorb.mq5` (saved on Adam's desktop and here) is the current file Jarvis maintains.** It supersedes the older v2.10 (`TWI_Sniper_ORB.mq5`, still on desktop, now stale — v2.61 is the one to run). Structurally verified only: brace-balanced (179 open = 179 close), no stale references from the merge. **Not compiler-verified** — Jarvis has no MetaEditor/MT5 tool access, so "verified" here means internally consistent, not confirmed to pass F7. Adam should compile it in MetaEditor before attaching to a live/demo chart and report back any errors with the actual file, not just an error list (see the standing note below on why that matters).
+**v2.61, `TWIorb.mq5` (saved on Adam's desktop and here) is the current file Jarvis maintains.** It supersedes the older v2.10 (`TWI_Sniper_ORB.mq5`, still on desktop, now stale — v2.61 is the one to run). **Update 2026-08-21/24: since compiled (`TWIORB24.ex5`, running on the RisenAdam MT5 terminal), backtested (see below), and now confirmed live-trading with real closed trades** — the "not compiler-verified" caveat below is historical, from before Jarvis had direct MetaEditor CLI access on this machine.
 
 **Provenance**: v2.60 was built independently by Adam in Grok (header comment credits a loaded `.set` file: `EntryMode=Break POI=Midline Risk=3.0% FixedLots=0.20 PartialClose=off MaxTradesSession=2 MaxTradesDay=2`), pasted in with the message "so this works amazing with gold i just need it adjusted to handle forex pairs please look and fix and save to file TWIorb." Grok's build already contained an equivalent 3-session preset system to the one Jarvis had just added to v2.10 — independent convergence, no extra work needed there. Jarvis applied one fix (the forex spread cap, above), relabeled it v2.61, and saved it as `TWIorb.mq5`.
 
@@ -95,6 +95,54 @@ Compiled EA is `TWIORB24.ex5`, running on the RisenAdam MT5 terminal. Adam ran t
 | Every entry mode seen | `ENTRY_BREAK` (immediate market order on M5 close beyond the range) — this is the **default** `InpEntryMode`, not the sniper-retrace mode the EA is named for |
 
 **Read of this result:** a real but very thin edge over a 3-week window at 24 trades — not enough sample size to call it validated, and every single exit was the trailing stop doing the work (locking in partial gains on winners, cutting losses on losers) rather than the raw TP/SL ever being hit outright. Worth a longer/larger-sample backtest (the Jan–Aug range, properly, with fixed lots this time) before trusting this on the live account beyond the current 0.01-lot size. Trailing-stop and BE-move logic (`g_trail`, `InpBETriggerR`) is clearly doing most of the risk management here — worth understanding before scaling size up.
+
+## Live results (2026-08-24) — first confirmed live activity
+
+Prior notes had this EA at "no live trade yet." Adam shared MT5 mobile screenshots of two real closed trades on XAUUSD, both winners:
+
+| Ticket | Entry → Exit | Opened | Closed | P/L | SL (at close) | TP | Comment |
+|---|---|---|---|---|---|---|---|
+| #8025059 | 4645.28 → 4650.34 | 09:05:00 | 09:09:08 | +$5.06 | 4650.83 | 4655.75 | TWI Sniper |
+| (second) | 4645.27 → 4655.95 | — | — | +$10.68 | — | — | TWI Sniper |
+
+Account running total shown: Profit 15.57, Balance 15.57 (small-balance account, not necessarily the full account context — not independently verified which terminal/account this is).
+
+**Read of the SL:** #8025059's stop (4650.83) sits *above* its 4645.28 entry on a BUY — not a misconfigured stop, that's the EA's break-even/trail logic (`g_trail`, `InpBETriggerR`) having already moved the stop into profit before the trade closed. Matches exactly what the backtest read above predicted would be doing most of the work.
+
+**Adam's read, 2026-08-24: "TWI Sniper has huge potential, nice gain and tight stop loss."** Worth weighing against the backtest context above — 2 live trades is a tiny sample after a 24-trade backtest that came out thin (profit factor ≈1.04, right at breakeven). Real, and a genuinely good sign the live mechanics (entry, BE-move, trail) are working as designed — not yet enough to call the edge validated on its own.
+
+**Correction, same day:** Adam clarified both live trades were closed *manually* by him, not automatically — the ~$5 "clean trail" result on the first trade was him closing near where the trail had gotten to, not the trail itself locking it in. Same day, on the demo/FTMO account (RisenMOM, [[TWI Scalp Pro]]), a different trade went from +$11.28 to -$50.24 and hit its stop for a real loss — because break-even hadn't triggered yet (profit hadn't reached the full 1R threshold). Adam: *"I just don't want on .01 to be up $10 and then all of a sudden be negative... I want to close in profit."*
+
+## Live results (2026-08-24, end of day) — two more trades, biggest win yet
+
+Adam shared MT5 mobile screenshots of the full day's closed history plus an M15 XAUUSD chart with the EA's own buy/sell arrows drawn on it. Read directly from the History screen:
+
+| Symbol | Side | Entry → Exit | Closed | P/L |
+|---|---|---|---|---|
+| GBPUSD | sell 0.01 | 1.36475 → 1.36492 | 06:23:22 | -0.17 |
+| XAUUSD | buy 0.01 | 4645.28 → 4650.34 | 09:09:08 | +5.06 (already logged above) |
+| XAUUSD | buy 0.01 | 4645.27 → 4655.95 | 09:16:08 | +10.68 (already logged above) |
+| XAUUSD | buy 0.01 | 4652.25 → 4655.56 | 14:35:06 | +3.31 |
+| XAUUSD | buy 0.01 | 4652.33 → 4678.84 | 16:34:38 | +26.51 |
+
+Day summary panel: Deposit 0.00, Profit 45.39, Balance 45.39. The five P/L figures above sum to exactly +45.39, confirming this is the complete list of today's closed deals, not a partial view.
+
+**+26.51 is the largest single win logged yet** — a real 26.5-point trending move captured on 0.01 lots, visible on the shared M15 chart with a blue buy arrow near 4652 and price running to ~4678 before the matching sell arrow. **Not independently confirmed whether this specific trade ran under the tightened settings (`InpBETriggerR` 0.5) or the old ones** — the earlier open caveat about the live chart's Properties dialog still showing `1.0` for break-even trigger (not the intended `0.5`) was never resolved as of this session, so this result doesn't by itself prove the fix took effect; it's a good outcome either way.
+
+**GBPUSD sell (-0.17):** small loss, different symbol/direction than the EA's usual gold-heavy activity today — not confirmed which system placed it (could be TWI Sniper ORB's forex side, per the asset-profile system above, or something else). Noted rather than assumed.
+
+**Adam's read: "Did a fantastic job the EA."**
+
+## Risk parameters tightened 2026-08-24 — root-caused, not guessed
+Diagnosed the actual mechanism before touching anything: `InpBETriggerR` gates break-even on reaching the *full original risk* (1R) in profit — if the trade reverses before hitting that threshold, zero protection has activated, and a $10+ profit can round-trip straight to the original stop loss. That's the real cause of the "up then negative" pattern Adam described, not the trail distance.
+
+**Two changes made, confirmed with Adam before touching the live file:**
+- `InpBETriggerR`: **1.0 → 0.5** — break-even-plus now triggers at half the original risk instead of the full risk, protecting gains much sooner.
+- `InpGoldTrail`: **80 → 10** — once protected, the stop now follows price tightly (10 points) instead of giving back a wide 80-point cushion.
+
+Extracted the exact source from this note (the single source of truth, since this machine has no standalone `.mq5` copy — only the compiled `.ex5`), wrote it to `TWIORB24.mq5` in the RisenAdam terminal's `MQL5\Experts\Advisors\` folder, recompiled via `MetaEditor64.exe` CLI: **0 errors, 0 warnings.**
+
+**Open caveat, not yet confirmed:** recompiling updates the `.ex5` file, but if TWI Sniper ORB is already attached and running on a live chart, MT5 may or may not pick up the new input defaults automatically depending on whether a `.set` file or manually-customized inputs were used at attach time. Adam needs to check the EA's Properties on the live chart (Break-even trigger should show 0.5, Gold trail distance should show 10) and re-attach if it's still showing the old values — this session has no way to verify per-chart EA input state via the MT5 API, only positions/account data.
 
 ## Full source (v2.61, as maintained 2026-08-20)
 ```mql5
@@ -238,7 +286,7 @@ input double          InpGoldMinBreak       = 0;             // Gold: extra brea
 input double          InpGoldMinFVG         = 20;            // Gold: min FVG size
 input double          InpGoldSLBuffer       = 80;            // Gold: SL buffer beyond zone
 input double          InpGoldBEOffset       = 20;            // Gold: break-even offset
-input double          InpGoldTrail          = 80;            // Gold: trail distance
+input double          InpGoldTrail          = 10;            // Gold: trail distance (tightened 2026-08-24 from 80, see Live results)
 input double          InpGoldFixedTP        = 300;           // Gold: fixed TP (fixed-points mode)
 input double          InpGoldMaxSpread      = 350;           // Gold: max spread
 input double          InpGoldSlippage       = 30;            // Gold: deviation
@@ -316,7 +364,7 @@ input ENUM_TP_MODE    InpTPMode             = TP_RR;         // Take profit mode
 input double          InpRR                 = 2.0;           // Reward : Risk
 input double          InpRangeTPMultiple    = 1.0;           // TP = range height x this
 input int             InpFixedTPPoints      = 300;           // MANUAL profile: fixed TP (raw points)
-input double          InpBETriggerR         = 1.0;           // Move to break-even after this R
+input double          InpBETriggerR         = 0.5;           // Move to break-even after this R (tightened 2026-08-24 from 1.0, see Live results)
 input int             InpBEOffsetPoints     = 20;            // MANUAL profile: BE offset (raw points)
 input bool            InpPartialClose       = false;         // Partial close at target R
 input double          InpPartialPercent     = 50.0;          // Partial close percent

@@ -24,15 +24,21 @@ I'm Adam Landrum, a forex trader, born May 9, 1985.
 I trade forex using MetaTrader 5 and TradingView. My trading is handled by an EA (Expert Advisor) called TWP ORB, which executes trades for me automatically.
 - **Status:** Active
 
+## Promiseland Park (06 - Promiseland Park)
+
+My theme park idea: a faith-themed family park built around a central plaza ([[Promise Plaza]]) and five other named lands. Idea stage as of 2026-08-24 — see [[Promiseland Park]] for the full project skeleton.
+- **Status:** Idea
+
 ## Vault Structure
 
 ```
-00 - Inbox          ← Capture everything, sort later
-01 - Daily Notes    ← Dated logs of what got done, one file per day
-02 - Forex Trading  ← Forex trading via MT5/TradingView, run by the TWP ORB EA
-03 - Personal       ← Life outside work
-04 - Archive        ← Completed projects and old notes
-05 - Resources      ← Cross-project reference material, templates, Jobs
+00 - Inbox              ← Capture everything, sort later
+01 - Daily Notes        ← Dated logs of what got done, one file per day
+02 - Forex Trading      ← Forex trading via MT5/TradingView, run by the TWP ORB EA
+03 - Personal           ← Life outside work
+04 - Archive            ← Completed projects and old notes
+05 - Resources          ← Cross-project reference material, templates, Jobs
+06 - Promiseland Park   ← Theme park idea: park plan, lands, business/financial notes
 ```
 
 ## What's Active Right Now
@@ -112,6 +118,7 @@ When creating or editing a note, add `wikilinks`:
 - `01 - Daily Notes/*` → `personal`
 - `04 - Archive/*` → infer from content / original project
 - `05 - Resources/*` → `meta`
+- `06 - Promiseland Park/*` → `promiseland-park`
 - `00 - Inbox/*` → infer from content, else `personal`
 - Root-level files → `meta`
 
@@ -125,7 +132,7 @@ When creating or editing a note, add `wikilinks`:
 ### Valid Field Values
 
 **status:** `active` | `completed` | `parked` | `idea` | `archived`
-**project:** `forex-trading` | `personal` | `meta`
+**project:** `forex-trading` | `personal` | `meta` | `promiseland-park`
 **type:** `index` | `reference` | `guide` | `plan` | `log`
 
 ### Folder Indexes (keep them in sync)

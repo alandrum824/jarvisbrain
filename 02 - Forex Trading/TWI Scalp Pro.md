@@ -27,9 +27,12 @@ Adam runs Jarvis in two separate chats: one on his main desktop machine (where t
 
 **Resolved 2026-08-22, this machine:** pulled the vault via `git pull` (see [[Mom's eBay Store (EMarketingTX)]]'s note-history for the same day's merge story), found the source at `02 - Forex Trading/TWI Scalp Pro.mq5`, and placed + compiled it on **both** MT5 terminals installed here:
 - **RisenAdam** — data folder `C3F62A8326295558A052069AC3E69E3E`, file at `MQL5\Experts\Advisors\TWIScalpPro.mq5`/`.ex5` (matches this terminal's existing convention — [[TWI Range Breakout]] lives in the same `Advisors` subfolder there).
-- **RisenMOM** — data folder `1E8D644434576A3AECBEDD6601AB83BA` (Adam's mom's terminal), file at `MQL5\Experts\TWIScalpPro.mq5`/`.ex5` directly (matches this terminal's own convention — its existing EAs sit straight in `Experts\`, no subfolder).
+- **RisenMOM** — data folder `1E8D644434576A3AECBEDD6601AB83BA` (Adam's mom's terminal), file at `MQL5\Experts\TWIScalpPro.mq5`/`.ex5` directly (matches this terminal's own convention — its existing EAs sit straight in `Experts\`, no subfolder). **Account confirmed 2026-08-23 via the `mt5-bridge` Python check: this terminal is logged into a DEMO account** (`OANDA-Demo-1`, login `1600175163`, balance $10,385.23 demo funds), not a live account — worth knowing before assuming any activity here is real money.
 
 Both compiled via direct `MetaEditor64.exe /compile` CLI access, each terminal's own MetaEditor: **0 errors, 0 warnings** on both, first pass. Neither is attached to any chart — only the filesystem and compiler were touched, the terminal UIs were never opened.
+
+## Manual trading companion
+[[TWI Scalp Pro Signals]] — a TradingView Pine v6 indicator built 2026-08-23 that mirrors this EA's exact entry logic (sessions, OR, H1 EMA trend filter, entry/SL/TP math) so Adam can manually trade the same setups without the EA placing orders. Live on the chart, compiled clean, verified against real signal data.
 
 ## Not yet done
 - **Compiled and verified on this machine's two terminals (RisenAdam, RisenMOM) — not yet compiled on the main desktop machine's AAAFx terminal**, per that session's own note (no MetaEditor access there at the time it was written).
