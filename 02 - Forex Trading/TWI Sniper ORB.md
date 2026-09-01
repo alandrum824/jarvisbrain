@@ -62,7 +62,54 @@ Grok's build added real visibility that v2.10 didn't have:
 Three named sessions — **Asia, London, New York** — each with its own enable toggle and start/end hours (broker server time), plus `InpSessionPreset` to quickly restrict to just one (or leave on "All" to trade all three). Defaults: Asia 00:00–04:00, London 08:00–12:00, New York 13:30–17:00 — these are placeholders, **verify against Adam's actual broker's server time before running live.**
 
 ## Status
-**v2.61, `TWIorb.mq5` (saved on Adam's desktop and here) is the current file Jarvis maintains.** It supersedes the older v2.10 (`TWI_Sniper_ORB.mq5`, still on desktop, now stale — v2.61 is the one to run). Structurally verified only: brace-balanced (179 open = 179 close), no stale references from the merge. **Not compiler-verified** — Jarvis has no MetaEditor/MT5 tool access, so "verified" here means internally consistent, not confirmed to pass F7. Adam should compile it in MetaEditor before attaching to a live/demo chart and report back any errors with the actual file, not just an error list (see the standing note below on why that matters).
+**v2.62, `TWIorb.mq5` (saved on Adam's desktop and here) is the current file Jarvis maintains.** It supersedes the older v2.10 (`TWI_Sniper_ORB.mq5`, still on desktop, now stale — v2.62 is the one to run). **Update 2026-08-21/24: since compiled (`TWIORB24.ex5`, running on the RisenAdam MT5 terminal), backtested (see below), and now confirmed live-trading with real closed trades** — the "not compiler-verified" caveat below is historical, from before Jarvis had direct MetaEditor CLI access on this machine.
+
+## Update 2026-08-29/30 — major overnight experimentation session (renamed TWIORB24.mq5)
+
+Long session testing entry-mechanism ideas and a chop filter against the locked baseline. File is `TWIORB24.mq5` now (not `TWIforexgold.mq5`), byte-identical on both terminals: `RisenMOM\...\MQL5\Experts\TWIORB24.mq5` and `RisenAdam\...\MQL5\Experts\Advisors\TWIORB24.mq5`. All testing was Strategy Tester only (RisenMOM/demo), never attached live during this session — but **RisenAdam also has this EA attached and loaded live (XAUUSD, M5)** independent of tonight's TWP work, confirmed by reading RisenAdam's own terminal log; 0 trades fired during the session, AutoTrading state confirmed ON as of the TWP deployment later the same night.
+
+**Locked baseline (unchanged from 2026-08-29, re-confirmed tonight):** `ENTRY_STOP` mode (resting stop order right at the range boundary, fills instantly — beats waiting for a bar close), `InpGoldHTFFilter=false`. 12-month backtest (XAUUSD.sim M5, Sep 2025–Aug 2026, fixed 0.01 lots): **501 trades, +$136.02 net, PF 1.06, Sharpe 1.65, max DD 3.09%.**
+
+**Critical robustness finding — the edge is NOT stable year to year.** Ran the identical locked config on the PRIOR 12-month window (Sep 2024–Aug 2025) as a genuine out-of-sample check: **-$33.01 net, PF 0.97, Sharpe -0.98.** The same exact strategy that made money in the primary window lost money the year before. Treat "profitable" as fragile, not proven, for this EA.
+
+**Four new entry-mode experiments built and tested — all rejected, none beat the locked baseline:**
+| Mode | Idea | Trades | Net | PF | Sharpe |
+|---|---|---|---|---|---|
+| `ENTRY_RETEST` (pre-existing) | Retest the broken range boundary | — | — | 0.96 | — |
+| `ENTRY_POC` | Retest previous day's volume-profile POC | 84 | +$22.17 | 1.15 | 8.60 (noise — sample too small to trust) |
+| `ENTRY_FIB` | Retrace into 0.71–0.84 Fib zone of the breakout leg (Adam's ICT-style idea) | 279 | -$234.91 | 0.66 | -5.00 |
+| `ENTRY_MA` | Retest a live 20-EMA as dynamic support/resistance (from a shared Bitcoin trade video) | 443 | -$236.29 | 0.74 | -5.00 |
+
+Pattern across all four: this EA's edge lives in the *instant* `ENTRY_STOP` fill, not in waiting for any kind of pullback/retest. Every "wait for a deeper retrace" variant underperformed or was too thin a sample to trust. Concluded the entry-mechanism search is closed for now.
+
+**Grid recovery experiment — built, tested, explicitly rejected.** Added `InpUseGridRecovery` (3-level martingale-style averaging instead of a hard stop) at the user's request. At 0.25 lots on gold, 60.25% *equity* drawdown occurred mid-test (account synthetically dropped to ~35% of starting balance before recovering) even though *balance* drawdown looked tame (6.61%) — the exact gap that makes grid systems look safe until they aren't. Confirmed the theory: a losing ORB breakout is disproportionately likely to be a real trend continuing against the position, which is exactly the scenario a recovery grid adds into. **Left off by default (`InpUseGridRecovery=false`), present in the compiled file as an inert, off-by-default option — not removed, not enabled.**
+
+**Volatility/chop filter — built, swept, tested out-of-sample, NOT locked in.** Added `InpVolFilterEnabled`/`InpVolFilterMinRatio` etc. — blocks a session's entry when the daily ATR ratio (vs. its own 100-day baseline) falls below a threshold, on the theory that chop (not high volatility) is what actually hurts a breakout system. Confirmed directionally: blocking HIGH-vol days made things worse (wild days are the good trades here); blocking LOW-vol/chop days helped. Swept ratio 0.5→0.9: 0.5–0.6 did almost nothing, 0.7 gave a real, consistent improvement (PF 1.07, Sharpe 2.07, DD 2.30% vs. baseline's 3.09%), but 0.8/0.9 kept climbing (Sharpe up to 5.94) with NO plateau — a classic overfitting signature on a single 12-month sample. **Ran the 0.7 filter on the prior-year out-of-sample window as the real test: it made an already-losing year WORSE (-$52.28 vs. -$33.01 unfiltered).** Verdict: the filter does not generalize. Left off by default; present in the file as an inert option, same as the grid recovery.
+
+**Weekly forecast (from the locked baseline's real per-week trade counts, not an estimate):** every one of the 52 weeks in the primary backtest had trades fire; 79% of weeks hit exactly 10 (the mechanical ceiling — 2/session × 3 sessions capped at 2/day × 5 days); range 7–10. Expected weekly $ at 0.01 lots: **+$2.60–2.90**, but with roughly ±$30 week-to-week noise (avg win $9.95 / avg loss -$9.38 are nearly symmetric) — the edge is real but tiny relative to variance.
+
+**FTMO/prop-firm suitability: concluded NOT viable as currently tuned.** The math: scaling position size enough to hit a 10%-in-30-days challenge target also scales the 3.09% backtested max DD past FTMO's 10% hard limit — there's no lot size that clears the profit bar without also guaranteeing the drawdown breach, given how thin and unstable (see out-of-sample finding above) the real edge is.
+
+## Update 2026-08-27 — first live forex test (EURUSD, RisenAdam)
+Adam attached TWI Sniper ORB to a **EURUSD M5 chart on RisenAdam**, deliberately — the first real live test of this EA's forex profile since the `InpFxMaxSpread` fix (2026-08-20, 4→15 pips) was made. Until now the fix was only ever verified in theory; every real closed trade logged for this EA has been on gold. Status at first check: London session armed, one opening range already rejected for being too small (out of the 4.0-200.0 pip allowed size), no trade yet, $0 day P/L. Nothing else changed — still v2.62, same file, just a new symbol attached. Worth watching whether real forex trades actually start firing now that the spread cap isn't silently blocking every entry.
+
+## Update 2026-08-25 — v2.62: ATR-based adaptive trail
+With TWI Sniper the clear best performer so far (10W/0L, +$375.56 combined across both accounts over 14 days — see [[Active Priorities]] for the running comparison against [[TWI Scalp Pro]]), Adam asked for real improvement ideas, not just praise. Flagged honestly first: that record is a thin sample (10 live trades), and the one real backtest (24 trades, 3 weeks, fixed lots) came out near-breakeven (profit factor ≈1.04) with every exit closed by the trailing stop rather than a raw TP/SL — so the live win streak is likely being carried by the break-even/trail management, not a dominant raw entry edge. Proposed four angles (test the actual `ENTRY_SNIPER` retrace mode instead of the `ENTRY_BREAK` default it's quietly running today; make the trail volatility-adaptive instead of one fixed number; get a proper large-sample backtest before scaling size; consider a partial-close at 1R). Adam approved building the trail change.
+
+**What changed (`TWIORB24.mq5`, RisenAdam terminal, `MQL5\Experts\Advisors\`):**
+- New inputs under `=== Adaptive Trail (ATR) ===`: `InpUseATRTrail` (bool, default **true**), `InpATRPeriod` (default 14), `InpATRMultiplier` (default 1.0).
+- New `atrHandle` (via `iATR(_Symbol, InpSignalTF, InpATRPeriod)`, created in `OnInit()` alongside the existing EMA handle) and matching `ATRValue()` helper next to `EMAValue()`.
+- `ManageOpen()`'s trail block now computes `trailDist = ATRValue() * InpATRMultiplier` when `InpUseATRTrail` is on and ATR is producing a real value, replacing the old flat `g_trail` distance. **Falls back to the original fixed-points `g_trail` behavior automatically** if the ATR handle fails to create or returns 0 (e.g. not enough history yet) — never trails with a zero distance, and the original behavior is fully preserved when `InpUseATRTrail = false`.
+- Bumped to v2.62, changelog comment added at the top of the file matching the existing convention (see the v2.60→2.61 comment above it).
+- Compiled clean via `MetaEditor64.exe` CLI, twice (once before the version-bump header edit, once after): **0 errors, 0 warnings** both times.
+
+**Not yet done, and matters:** the running chart instance does not pick up a recompiled `.ex5` automatically — MT5 only reloads an EA's compiled logic when it's manually removed and re-added to the chart (or the terminal restarts). **The live RisenAdam chart is still running the old v2.61 fixed-trail logic until Adam detaches and re-attaches the EA.** Both accounts show 0 open positions right now, so it's a safe moment to do that without interrupting a live trade. When he does, the Inputs dialog should show the new `InpUseATRTrail`/`InpATRPeriod`/`InpATRMultiplier` fields — worth confirming they're there as proof the new `.ex5` actually loaded.
+
+**Real discovery made while doing this: RisenMOM is running a different, older build.** RisenMOM's own `TWIORB24.mq5` (`MQL5\Experts\TWIORB24.mq5`, no `Advisors` subfolder — matches that terminal's own convention) was **v2.31**, not v2.61/2.62 — no `InpGoldTrail`/asset-profile system, a smaller/older file (1603 lines vs. RisenAdam's 2197+). This wasn't previously documented anywhere in this note, which only ever described the EA as "running on the RisenAdam MT5 terminal." Real, closed TWI Sniper trades were hitting RisenMOM too (4W/0L, +$350.73 per the 2026-08-25 EA comparison), so it was actively trading on the older version, not idle.
+
+**Resolved same day, per Adam's go-ahead:** rather than hand-patch a materially different/older codebase blind, copied RisenAdam's current v2.62 file over RisenMOM's old one outright (`cp`, full file replacement — both terminals now run byte-identical source). Compiled clean via RisenMOM's own `MetaEditor64.exe` CLI: **0 errors, 0 warnings.** This brings RisenMOM every fix that was previously RisenAdam-only: the asset-profile system, the forex max-spread fix (4→15 pips), the break-even tightening (1.0R→0.5R), and now the ATR-adaptive trail.
+
+**Input-carryover caveat, same as RisenAdam:** MT5 preserves a chart's previously-set input values across a recompile *for input names that still exist* — so whatever Adam had customized on RisenMOM's live chart (lot mode/size, sessions, magic, comment, etc.) should carry over automatically on reattach, since those input names are unchanged. But several input *names* that existed in the old v2.31 (`InpMinRangePoints`, `InpTrailPoints`, `InpSLBufferPoints`, etc.) are now repurposed as MANUAL-profile-only fallbacks in v2.62 — the actual live gold/forex behavior comes from the new asset-profile inputs instead, which have no prior value to inherit and will start on their coded defaults. **Not independently verified what RisenMOM's live Properties dialog was actually set to before this change** — worth Adam checking the full Inputs list after reattaching, same as the RisenAdam caveat below, rather than assuming everything carried over exactly as intended.
 
 **Provenance**: v2.60 was built independently by Adam in Grok (header comment credits a loaded `.set` file: `EntryMode=Break POI=Midline Risk=3.0% FixedLots=0.20 PartialClose=off MaxTradesSession=2 MaxTradesDay=2`), pasted in with the message "so this works amazing with gold i just need it adjusted to handle forex pairs please look and fix and save to file TWIorb." Grok's build already contained an equivalent 3-session preset system to the one Jarvis had just added to v2.10 — independent convergence, no extra work needed there. Jarvis applied one fix (the forex spread cap, above), relabeled it v2.61, and saved it as `TWIorb.mq5`.
 
@@ -76,6 +123,73 @@ Three named sessions — **Asia, London, New York** — each with its own enable
 - **Risk**: risk-% of balance (3.0% per the loaded `.set` file) or fixed lots (0.20); SL = zone edge + pip buffer; TP = R:R multiple (default 2R), range-height multiple, or fixed points.
 - **Trade management**: move to break-even at 1R (configurable), optional partial close at target R (off per the loaded `.set` file), trail by pip distance after BE.
 - **Guardrails**: max trades per session/day (asset-profile-specific), max daily loss/profit in $, max spread (asset-profile-specific — the exact thing that was just fixed), Friday-close cutoff.
+
+## Backtest results (2026-08-21, Jarvis + Adam)
+
+Compiled EA is `TWIORB24.ex5`, running on the RisenAdam MT5 terminal. Adam ran two Strategy Tester passes on XAUUSD, M5:
+
+**Pass 1 — default inputs, no `.set` loaded, Jan–Aug 2026, $10,000 test balance.** Stopped early by Adam. Default `InpLotMode = LOT_RISK_PERCENT` at 3.0% risk produced **20–35 lot orders** — constant `[No money]`/`[Market closed]` rejections. Confirms the same failure mode already seen on the live $391 account with a different config (1.58-lot rejection): **risk-percent lot mode on this EA scales to dangerous sizes unless a fixed-lots `.set` file is loaded.** Do not run this EA on any real account with default inputs — always load a `.set` with `InpLotMode = LOT_FIXED` and a sane `InpFixedLots` first.
+
+**Pass 2 — `.set` loaded (fixed 0.20 lots, matching the `twiprofitorb.set` provenance noted below), Aug 1–20 2026, $10,000 test balance.** Completed clean. Verified directly from the tester's own log (`Tester/logs/20260821.log`), trade-by-trade, cross-checked against the reported final balance:
+
+| | |
+|---|---|
+| Trades | 24 (all closed via trailing stop, none hit raw TP or original SL) |
+| Wins / Losses | 12 / 12 — **50% win rate** |
+| Gross win / loss | +105.29 pts / −100.97 pts |
+| Net | **+4.32 pts ≈ +$86.40 on 0.2 lots** (10000.00 → 10086.40) |
+| Profit factor | ≈1.04 — thin, close to breakeven |
+| Every entry mode seen | `ENTRY_BREAK` (immediate market order on M5 close beyond the range) — this is the **default** `InpEntryMode`, not the sniper-retrace mode the EA is named for |
+
+**Read of this result:** a real but very thin edge over a 3-week window at 24 trades — not enough sample size to call it validated, and every single exit was the trailing stop doing the work (locking in partial gains on winners, cutting losses on losers) rather than the raw TP/SL ever being hit outright. Worth a longer/larger-sample backtest (the Jan–Aug range, properly, with fixed lots this time) before trusting this on the live account beyond the current 0.01-lot size. Trailing-stop and BE-move logic (`g_trail`, `InpBETriggerR`) is clearly doing most of the risk management here — worth understanding before scaling size up.
+
+## Live results (2026-08-24) — first confirmed live activity
+
+Prior notes had this EA at "no live trade yet." Adam shared MT5 mobile screenshots of two real closed trades on XAUUSD, both winners:
+
+| Ticket | Entry → Exit | Opened | Closed | P/L | SL (at close) | TP | Comment |
+|---|---|---|---|---|---|---|---|
+| #8025059 | 4645.28 → 4650.34 | 09:05:00 | 09:09:08 | +$5.06 | 4650.83 | 4655.75 | TWI Sniper |
+| (second) | 4645.27 → 4655.95 | — | — | +$10.68 | — | — | TWI Sniper |
+
+Account running total shown: Profit 15.57, Balance 15.57 (small-balance account, not necessarily the full account context — not independently verified which terminal/account this is).
+
+**Read of the SL:** #8025059's stop (4650.83) sits *above* its 4645.28 entry on a BUY — not a misconfigured stop, that's the EA's break-even/trail logic (`g_trail`, `InpBETriggerR`) having already moved the stop into profit before the trade closed. Matches exactly what the backtest read above predicted would be doing most of the work.
+
+**Adam's read, 2026-08-24: "TWI Sniper has huge potential, nice gain and tight stop loss."** Worth weighing against the backtest context above — 2 live trades is a tiny sample after a 24-trade backtest that came out thin (profit factor ≈1.04, right at breakeven). Real, and a genuinely good sign the live mechanics (entry, BE-move, trail) are working as designed — not yet enough to call the edge validated on its own.
+
+**Correction, same day:** Adam clarified both live trades were closed *manually* by him, not automatically — the ~$5 "clean trail" result on the first trade was him closing near where the trail had gotten to, not the trail itself locking it in. Same day, on the demo/FTMO account (RisenMOM, [[TWI Scalp Pro]]), a different trade went from +$11.28 to -$50.24 and hit its stop for a real loss — because break-even hadn't triggered yet (profit hadn't reached the full 1R threshold). Adam: *"I just don't want on .01 to be up $10 and then all of a sudden be negative... I want to close in profit."*
+
+## Live results (2026-08-24, end of day) — two more trades, biggest win yet
+
+Adam shared MT5 mobile screenshots of the full day's closed history plus an M15 XAUUSD chart with the EA's own buy/sell arrows drawn on it. Read directly from the History screen:
+
+| Symbol | Side | Entry → Exit | Closed | P/L |
+|---|---|---|---|---|
+| GBPUSD | sell 0.01 | 1.36475 → 1.36492 | 06:23:22 | -0.17 |
+| XAUUSD | buy 0.01 | 4645.28 → 4650.34 | 09:09:08 | +5.06 (already logged above) |
+| XAUUSD | buy 0.01 | 4645.27 → 4655.95 | 09:16:08 | +10.68 (already logged above) |
+| XAUUSD | buy 0.01 | 4652.25 → 4655.56 | 14:35:06 | +3.31 |
+| XAUUSD | buy 0.01 | 4652.33 → 4678.84 | 16:34:38 | +26.51 |
+
+Day summary panel: Deposit 0.00, Profit 45.39, Balance 45.39. The five P/L figures above sum to exactly +45.39, confirming this is the complete list of today's closed deals, not a partial view.
+
+**+26.51 is the largest single win logged yet** — a real 26.5-point trending move captured on 0.01 lots, visible on the shared M15 chart with a blue buy arrow near 4652 and price running to ~4678 before the matching sell arrow. **Not independently confirmed whether this specific trade ran under the tightened settings (`InpBETriggerR` 0.5) or the old ones** — the earlier open caveat about the live chart's Properties dialog still showing `1.0` for break-even trigger (not the intended `0.5`) was never resolved as of this session, so this result doesn't by itself prove the fix took effect; it's a good outcome either way.
+
+**GBPUSD sell (-0.17):** small loss, different symbol/direction than the EA's usual gold-heavy activity today — not confirmed which system placed it (could be TWI Sniper ORB's forex side, per the asset-profile system above, or something else). Noted rather than assumed.
+
+**Adam's read: "Did a fantastic job the EA."**
+
+## Risk parameters tightened 2026-08-24 — root-caused, not guessed
+Diagnosed the actual mechanism before touching anything: `InpBETriggerR` gates break-even on reaching the *full original risk* (1R) in profit — if the trade reverses before hitting that threshold, zero protection has activated, and a $10+ profit can round-trip straight to the original stop loss. That's the real cause of the "up then negative" pattern Adam described, not the trail distance.
+
+**Two changes made, confirmed with Adam before touching the live file:**
+- `InpBETriggerR`: **1.0 → 0.5** — break-even-plus now triggers at half the original risk instead of the full risk, protecting gains much sooner.
+- `InpGoldTrail`: **80 → 10** — once protected, the stop now follows price tightly (10 points) instead of giving back a wide 80-point cushion.
+
+Extracted the exact source from this note (the single source of truth, since this machine has no standalone `.mq5` copy — only the compiled `.ex5`), wrote it to `TWIORB24.mq5` in the RisenAdam terminal's `MQL5\Experts\Advisors\` folder, recompiled via `MetaEditor64.exe` CLI: **0 errors, 0 warnings.**
+
+**Open caveat, not yet confirmed:** recompiling updates the `.ex5` file, but if TWI Sniper ORB is already attached and running on a live chart, MT5 may or may not pick up the new input defaults automatically depending on whether a `.set` file or manually-customized inputs were used at attach time. Adam needs to check the EA's Properties on the live chart (Break-even trigger should show 0.5, Gold trail distance should show 10) and re-attach if it's still showing the old values — this session has no way to verify per-chart EA input state via the MT5 API, only positions/account data.
 
 ## Full source (v2.61, as maintained 2026-08-20)
 ```mql5
@@ -114,7 +228,7 @@ Three named sessions — **Asia, London, New York** — each with its own enable
 //+------------------------------------------------------------------+
 #property copyright   "TWI Sniper ORB"
 #property link        ""
-#property version     "2.61"
+#property version     "2.62"
 #property description "M15 opening range, M5 break and close, FVG/demand sniper retrace."
 // Defaults below are loaded from twiprofitorb.set (Adam, 2026-08-20):
 //   EntryMode=Break  POI=Midline  Risk=3.0%  FixedLots=0.20
@@ -129,6 +243,13 @@ Three named sessions — **Asia, London, New York** — each with its own enable
 // looks like "nothing happens." If forex is still quiet after this, read
 // the on-chart dashboard's "Status:" line (BlockingReason()) - it names the
 // exact blocker live, no guessing needed.
+//
+// JARVIS 2026-08-25: added an optional ATR-based trail (InpUseATRTrail,
+// InpATRPeriod, InpATRMultiplier). The old fixed-points trail (InpGoldTrail
+// etc.) was one static distance regardless of how much the market was
+// actually moving; ATR x multiplier tightens it in a quiet market and widens
+// it in a trending one. On by default, falls back to the fixed distance
+// automatically if the ATR handle/value is ever unavailable.
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -219,7 +340,7 @@ input double          InpGoldMinBreak       = 0;             // Gold: extra brea
 input double          InpGoldMinFVG         = 20;            // Gold: min FVG size
 input double          InpGoldSLBuffer       = 80;            // Gold: SL buffer beyond zone
 input double          InpGoldBEOffset       = 20;            // Gold: break-even offset
-input double          InpGoldTrail          = 80;            // Gold: trail distance
+input double          InpGoldTrail          = 10;            // Gold: trail distance (tightened 2026-08-24 from 80, see Live results)
 input double          InpGoldFixedTP        = 300;           // Gold: fixed TP (fixed-points mode)
 input double          InpGoldMaxSpread      = 350;           // Gold: max spread
 input double          InpGoldSlippage       = 30;            // Gold: deviation
@@ -297,13 +418,25 @@ input ENUM_TP_MODE    InpTPMode             = TP_RR;         // Take profit mode
 input double          InpRR                 = 2.0;           // Reward : Risk
 input double          InpRangeTPMultiple    = 1.0;           // TP = range height x this
 input int             InpFixedTPPoints      = 300;           // MANUAL profile: fixed TP (raw points)
-input double          InpBETriggerR         = 1.0;           // Move to break-even after this R
+input double          InpBETriggerR         = 0.5;           // Move to break-even after this R (tightened 2026-08-24 from 1.0, see Live results)
 input int             InpBEOffsetPoints     = 20;            // MANUAL profile: BE offset (raw points)
 input bool            InpPartialClose       = false;         // Partial close at target R
 input double          InpPartialPercent     = 50.0;          // Partial close percent
 input double          InpPartialAtR         = 1.0;           // Partial close at this R
 input bool            InpTrailAfterBE       = true;          // Trail after break-even
 input int             InpTrailPoints        = 80;            // MANUAL profile: trail distance (raw points)
+
+input group "=== Adaptive Trail (ATR) ==="
+// JARVIS 2026-08-25: g_trail (Gold/Forex/Manual profile trail distance above)
+// is a flat number regardless of how much the market is actually moving.
+// Turning this on replaces that fixed distance with ATR x multiplier once
+// break-even has triggered, so the trail is tight in a quiet market and wide
+// in a trending one instead of one static number doing both jobs. Falls back
+// to the fixed g_trail distance automatically if the ATR handle or value is
+// ever unavailable (e.g. not enough history yet) - never trails with zero.
+input bool            InpUseATRTrail        = true;          // Use ATR-based trail instead of fixed points
+input int             InpATRPeriod          = 14;            // ATR period (on the signal timeframe)
+input double          InpATRMultiplier      = 1.0;           // Trail distance = ATR x this multiplier
 
 input group "=== Limits and Filters ==="
 input int             InpMaxTradesSession   = 2;             // MANUAL profile: max trades per session
@@ -386,6 +519,7 @@ datetime dayStamp       = 0;
 datetime lastSignalBar  = 0;
 datetime lastStatsTime  = 0;
 int      emaHandle      = INVALID_HANDLE;
+int      atrHandle      = INVALID_HANDLE;
 string   prefix         = "TWI_SNIPER_";
 
 // Resolved distances, in POINTS, produced by ResolveProfile() at startup.
@@ -863,6 +997,16 @@ double EMAValue()
       return 0.0;
    double b[];
    if(CopyBuffer(emaHandle, 0, 0, 1, b) < 1)
+      return 0.0;
+   return b[0];
+  }
+
+double ATRValue()
+  {
+   if(atrHandle == INVALID_HANDLE)
+      return 0.0;
+   double b[];
+   if(CopyBuffer(atrHandle, 0, 0, 1, b) < 1)
       return 0.0;
    return b[0];
   }
@@ -2023,7 +2167,20 @@ void ManageOpen()
         }
 
       // ---- trail once break-even is in place
-      if(InpTrailAfterBE && g_trail > 0)
+      // Trail distance is ATR x InpATRMultiplier when InpUseATRTrail is on and
+      // the ATR handle is producing real values, so a quiet market gets a tight
+      // trail and a trending one gets room to run - instead of the one fixed
+      // g_trail number doing both jobs. Falls back to g_trail (the original
+      // fixed-points behaviour) whenever ATR isn't available.
+      double trailDist = g_trail * Pt();
+      if(InpUseATRTrail)
+        {
+         double atr = ATRValue();
+         if(atr > 0.0)
+            trailDist = atr * InpATRMultiplier;
+        }
+
+      if(InpTrailAfterBE && trailDist > 0.0)
         {
          double beLine = (ptype == POSITION_TYPE_BUY)
                          ? entry + g_beOffset * Pt()
@@ -2033,16 +2190,15 @@ void ManageOpen()
                                                   : (sl > 0.0 && sl <= beLine + Pt());
          if(beOn)
            {
-            double trail = g_trail * Pt();
             if(ptype == POSITION_TYPE_BUY)
               {
-               double nsl = NormalizePrice(bid - trail);
+               double nsl = NormalizePrice(bid - trailDist);
                if(nsl > sl + Pt())
                   trade.PositionModify(ticket, nsl, tp);
               }
             else
               {
-               double nsl = NormalizePrice(ask + trail);
+               double nsl = NormalizePrice(ask + trailDist);
                if(sl <= 0.0 || nsl < sl - Pt())
                   trade.PositionModify(ticket, nsl, tp);
               }
@@ -2116,6 +2272,15 @@ int OnInit()
      {
       Print("TWI Sniper | failed to create the EMA handle");
       return INIT_FAILED;
+     }
+
+   // Not fatal if this fails - ManageOpen() falls back to the fixed g_trail
+   // distance automatically whenever ATRValue() comes back as 0.
+   if(InpUseATRTrail)
+     {
+      atrHandle = iATR(_Symbol, InpSignalTF, InpATRPeriod);
+      if(atrHandle == INVALID_HANDLE)
+         Print("TWI Sniper | failed to create the ATR handle - trail will fall back to the fixed distance");
      }
 
    ArrayResize(g_track, 0);
