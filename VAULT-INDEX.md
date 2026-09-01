@@ -170,6 +170,8 @@ If today's note already exists from an earlier session, append a new session sec
 #### Trigger 1: Wrap-Up Signal
 Never ask Adam if he's done working. When he signals it ("I'm done," "calling it," "goodnight"), offer to create or update today's daily note. Always check the actual current date and time first — conversations can stay open overnight.
 
+**Then push to GitHub (Adam's standing instruction, 2026-09-01).** Once the daily note is written and any other checkpoint edits are in, sync the vault: `git status`/`git diff` to review what's actually changing (skip stray artifacts, never blind `-A`), `git add` the real files, commit, and `git push origin main`. If another session may have pushed since this one started, `git fetch`/`git pull` first so the push doesn't hit an avoidable conflict. Do this every day the vault changed — don't let work sit unsynced overnight.
+
 #### Trigger 2: Review Yesterday's Note at Start of Conversation
 At the start of every conversation, after reading this index, check yesterday's daily note (or the most recent weekday if today is Monday).
 - **If it doesn't exist:** create it from whatever context you have (chat history, session context), and say it's reconstructed and may be incomplete. Zero context for that day → assume a day off and skip it. Don't create empty daily notes.
