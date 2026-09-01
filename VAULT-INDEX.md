@@ -47,6 +47,11 @@ All open work lives in one note: [[Active Priorities]]. Tag each item with its p
 - Sports: 49ers (NFL), Lakers (NBA), Angels (MLB), Ducks (NHL).
 - Frequent visitor of [[KTFAlways]] — follows Frank26 there and on YouTube.
 - Invested in Iraqi Dinar (IQD) currency.
+- Two sons: Elijah (playing club volleyball for ACT this season) and Malachi (older son, coaching Elijah's ACT team, has his own established SportsEngine account from his own volleyball history).
+
+## Health
+
+- Has POTS syndrome, which limits how much he's able to work.
 
 ## My Preferences for Working with AI
 
@@ -145,7 +150,7 @@ When Adam says something is done or asks to archive a note: (1) set its frontmat
 
 ### Daily Notes
 
-Daily notes capture what happened across all of Adam's work sessions for a day. They live in `01 - Daily Notes/`, ideally sorted into month subfolders (`01 - Daily Notes/06 - June 2026/`) once the folder fills up. Filename `YYYY-MM-DD.md`. Frontmatter `status: active`, `project: personal`, `type: log`.
+Daily notes capture what happened across all of Adam's work sessions for a day. They live in `01 - Daily Notes/`, in month subfolders named `NN - Month YYYY` (`01 - Daily Notes/08 - August 2026/`) from the very first note, never once the folder fills up — starting the convention later means two sessions reading two files disagree about where today's note goes. Filename `YYYY-MM-DD.md`. Frontmatter `status: active`, `project: personal`, `type: log`.
 
 Start the body with a human-readable date heading (`# Monday, June 8, 2026`). Then, right after it, an **`## Index`** block: one bold-topic line per session/entry with a one-sentence outcome. The index makes a day with many entries scannable instead of a wall of prose. Then the entry body follows `01 - Daily Notes/Daily Note Template.md` — create every daily note FROM that template (What Got Done · What's Still In Progress · Decisions Made · Notes Touched · Profile Updates); never hand-roll one.
 
