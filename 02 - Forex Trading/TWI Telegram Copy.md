@@ -32,6 +32,7 @@ MQL5 EA, polls that shared CSV on a timer (`PollSeconds`, default 3s). For each 
 Compiled clean (0 errors/0 warnings) on RisenAdam. **Not attached to any chart** — Adam's call when the Telegram side is live and tested.
 
 ## Real open items
+- **Blocked 2026-09-02: my.telegram.org rate-limited Adam's account** after repeated app-creation attempts (blank "ERROR" popups on every try, confirmed by Telegram's own "too many tries" message on a later attempt). This machine is a VPS — datacenter IPs get flagged/rate-limited by Telegram's anti-abuse system far more readily than a residential connection, likely a real factor here, not just attempt count. Waiting a few hours may or may not clear it. **Real workaround if it doesn't:** do the one-time my.telegram.org signup + first Telethon login from a residential connection (phone or home PC) instead of this VPS, which creates a local `telegram_signal.session` file — Telegram sessions aren't device-locked, so that file can be copied onto this machine afterward and the listener runs headlessly here with no further login needed.
 - Adam needs to provide `API_ID`/`API_HASH` (my.telegram.org) and run the listener once interactively to log in + pick channels.
 - No backtest possible for this EA (external live signal feed, no historical data to replay) — first real validation will be watching it live on a small size before trusting it.
 - Symbol mapping only handles GOLD/XAUUSD/XAU today; add more pairs to `SYMBOL_MAP` in the Python script if other channels/symbols get added later.
