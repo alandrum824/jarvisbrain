@@ -7,6 +7,25 @@ type: log
 
 Running log of discretionary chart analysis and strategy discussion with Adam — separate from [[Review Trades and Risk Management]], which is specifically about reviewing the automated TWP ORB EA's trades. This note is where manual chart reads, levels, and terminology land so a future session (voice or terminal) doesn't start cold. Append new entries under a dated heading; don't rewrite old ones.
 
+## Standing job (2026-09-01): live trade-assistant role, XAUUSD focus
+Adam asked Jarvis to become an ongoing live trade assistant — read charts, apply the frameworks already documented below (Sweep+MSS+Fib+OB, Ghost Trading, Market Structure HH/HL/LH/LL+BOS/CHoCH), and call out high-probability setups on demand, teaching the reasoning alongside each call. Scope: XAUUSD only for now. Reuses the existing [[TWI Sweep MSS IDM BOS OB]] indicator (already live on OANDA:XAUUSD 15m) and [[TWI Weekly Bias]] for HTF context — no new indicator needed to start. This note is the job's home; new live reads land under dated headings below as before.
+
+## 2026-09-02 — XAUUSD 15m, first live read under the new trade-assistant role
+Chart set OANDA:XAUUSD 15m, both custom indicators live ([[TWI Sweep MSS IDM BOS OB]] + [[TWI Weekly Bias]] — replaced the default RSI Bars/ADX to fit TradingView Basic's 2-indicator cap, same constraint noted in [[TWI Scalp POC]]).
+
+**Real sequence confirmed against actual OHLCV, not just label proximity:** sharp selloff from ~4449 down to a swing low of **4315.8** (bar 1788307200, O4324.455/H4330.55/L4315.8/C4328.355) on **volume 11,139 vs a ~2,000-3,800 local baseline** — a real 3-5x spike, not noise. The indicator's SWEEP label sits exactly on that bar's low (4315.8). Next bar closed 4328.345→4329.925, current price 4331.495 (`quote_get`) — price reclaimed back above the swept low on the volume spike, classic liquidity-sweep-and-reverse.
+
+**Order block zone (from `data_get_pine_boxes`):** 4316.285–4322.005 — sits right against the sweep wick, matches the OB definition (last down candle before the reversal impulse).
+
+**Not yet a confirmed entry.** No MSS/BOS label has printed above the sweep yet — the indicator hasn't confirmed the structure shift. Watching for a 15m close back above the nearest lines-above-price (4344.545 / 4347.575 / 4351.765) as the real MSS confirmation before calling this tradeable.
+
+**Context:** [[TWI Weekly Bias]] table reads `WkBias: BUY WEEK`, `Detail: W▲ D– H4▲ L▼` — weekly and H4 lean bullish, daily neutral, LTF bearish (matches the sharp intraday drop that just got swept).
+
+**Standing plan given to Adam:** wait for the MSS close-confirmation above ~4345-4351 before treating this as a real long; if it comes, OB retest (4316-4322) is the ideal entry zone, invalidation below 4315.8, first real target near the historical TARGET/line cluster at 4396.5/4404.3.
+
+## 2026-09-02 — EURUSD, 15m zone + 5m pullback entry, clean win
+Adam's own manual read, mobile MT5: marked a supply zone on the 15m (1.15904-1.15932, matching the swing highs there), waited for the 5m pullback into that zone, entered short, price dropped straight through to 1.15785 with no real retest — RSI (14) sliding from ~30 (15m) to ~26.6 (5m) on the drop, no bounce. Adam's own words: "played out perfect." Real, clean confirmation of his standing 15m-zone/5m-entry approach — logged as a win, no correction needed.
+
 ## Terminology Adam uses
 - **Order block (OB):** the last down-close (bearish) candle immediately before an impulsive up-move that breaks structure. Marked as a box spanning that candle's high to low, typically extended forward in time. (Bearish OB is the mirror: last up-close candle before an impulsive drop.)
 - **MSS (Market Structure Shift):** the point where price breaks prior structure, confirming a directional shift (e.g. "MSS (Bullish)" marks confirmation of an upward shift).

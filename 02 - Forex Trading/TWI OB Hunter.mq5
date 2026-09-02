@@ -12,6 +12,10 @@
 //|      displacement leg that caused the BOS. Its high/low become   |
 //|      a zone.                                                     |
 //|   5. ENTRY: price retraces back into the zone -> market order.   |
+//|      If UseEntryTFConfirm, entry instead waits for a lower-      |
+//|      timeframe (EntryTF) candle to "tap & close": wick into the  |
+//|      zone, then CLOSE back beyond it -- real reject/reclaim, not |
+//|      just a tick touching the zone.                              |
 //|  Zones expire unfilled after MaxOBAgeBars and are one-shot.      |
 //+------------------------------------------------------------------+
 #property copyright "TWI"
@@ -45,11 +49,15 @@ input int              MaxActiveOBs       = 6;              // oldest pruned bey
 
 input group "=== Entry / Exit ==="
 input bool             OnePerZone         = true;           // each zone can only be traded once
-input bool             UseLiquidityTP     = false;           // true = target nearest opposite unswept swing instead of fixed RR
+input bool             UseLiquidityTP     = true;            // true = target nearest opposite unswept swing instead of fixed RR
 input double           RR_Multiplier      = 2.0;             // used when UseLiquidityTP == false
 
+input group "=== Entry Timing ==="
+input bool             UseEntryTFConfirm  = true;            // false = old behaviour: enter the instant price ticks into the zone
+input ENUM_TIMEFRAMES  EntryTF            = PERIOD_M5;        // lower TF the tap-and-close confirmation is evaluated on
+
 input group "=== Risk / Lot Sizing ==="
-input ENUM_LOT_MODE    LotMode            = LOT_FIXED;
+input ENUM_LOT_MODE    LotMode            = LOT_DYNAMIC;
 input double           FixedLotSize       = 0.01;
 input double           RiskPercent        = 1.0;             // used when LotMode == LOT_DYNAMIC
 
@@ -102,6 +110,7 @@ int      pendBullBarsWaited = 0;
 
 int      atrHandle = INVALID_HANDLE;
 datetime lastStructBarTime = 0;
+datetime lastEntryBarTime = 0;
 int      obCounter = 0;
 
 //+------------------------------------------------------------------+
@@ -478,6 +487,71 @@ void TryEnterZones()
   }
 
 //+------------------------------------------------------------------+
+// Entry gated on a lower-timeframe (EntryTF) "tap & close": the just-
+// closed EntryTF candle must wick INTO the zone, then CLOSE back beyond
+// it -- real reject/reclaim, not just a tick touching the zone edge.
+void TryEnterZonesEntryTF()
+  {
+   if(CountOpenTrades() >= MaxConcurrentTrades)
+      return;
+   datetime now = TimeCurrent();
+   if(!DayAllowed(now) || !SessionAllowed(now))
+      return;
+
+   double closeE = iClose(_Symbol, EntryTF, 1);
+   double highE  = iHigh(_Symbol, EntryTF, 1);
+   double lowE   = iLow(_Symbol, EntryTF, 1);
+   double atr = CurrentATR();
+
+   for(int i = 0; i < ArraySize(obList); i++)
+     {
+      if(obList[i].filled)
+         continue;
+
+      if(obList[i].isBullish)
+        {
+         bool tapped    = lowE <= obList[i].top && lowE >= obList[i].bottom;
+         bool reclaimed = closeE > obList[i].top;
+         if(tapped && reclaimed)
+           {
+            double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            double sl    = obList[i].bottom - atr * OBBufferATRmult;
+            double risk  = entry - sl;
+            if(risk <= 0) continue;
+            double tp = UseLiquidityTP ? NearestOppositeLiquidity(true, entry) : entry + risk * RR_Multiplier;
+            if(tp <= entry) tp = entry + risk * RR_Multiplier;
+            double lot = CalcLot(risk);
+            if(trade.Buy(lot, _Symbol, 0, sl, tp, "TWI OB Hunter"))
+              {
+               if(OnePerZone) obList[i].filled = true;
+               if(CountOpenTrades() >= MaxConcurrentTrades) return;
+              }
+           }
+        }
+      else
+        {
+         bool tapped    = highE >= obList[i].bottom && highE <= obList[i].top;
+         bool reclaimed = closeE < obList[i].bottom;
+         if(tapped && reclaimed)
+           {
+            double entry = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+            double sl    = obList[i].top + atr * OBBufferATRmult;
+            double risk  = sl - entry;
+            if(risk <= 0) continue;
+            double tp = UseLiquidityTP ? NearestOppositeLiquidity(false, entry) : entry - risk * RR_Multiplier;
+            if(tp >= entry || tp <= 0) tp = entry - risk * RR_Multiplier;
+            double lot = CalcLot(risk);
+            if(trade.Sell(lot, _Symbol, 0, sl, tp, "TWI OB Hunter"))
+              {
+               if(OnePerZone) obList[i].filled = true;
+               if(CountOpenTrades() >= MaxConcurrentTrades) return;
+              }
+           }
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
 void OnTick()
   {
    datetime barTime = iTime(_Symbol, StructureTF, 0);
@@ -488,6 +562,18 @@ void OnTick()
          OnStructureBarClose();
      }
 
-   TryEnterZones();
+   if(UseEntryTFConfirm)
+     {
+      datetime entryBarTime = iTime(_Symbol, EntryTF, 0);
+      if(entryBarTime != lastEntryBarTime)
+        {
+         lastEntryBarTime = entryBarTime;
+         TryEnterZonesEntryTF();
+        }
+     }
+   else
+     {
+      TryEnterZones();
+     }
   }
 //+------------------------------------------------------------------+
