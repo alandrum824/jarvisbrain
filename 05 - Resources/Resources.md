@@ -18,3 +18,4 @@ Cross-project reference material, templates, and Jobs that don't belong to a sin
 - [[Base44 Apps]] — full inventory of Adam's 92 Base44 apps, categorized by theme; only [[Elijah Learning Academy]] and [[Juvenile Virtue]] explored in depth so far.
 - [[Marketing]] — Jared Rhodenizer's marketing playbook (principles, funnel strategy, copywriting/email/ads/lead-magnet/content/analytics playbooks); read before any marketing work. Also live as a Claude Code skill at `~/.claude/skills/jaredrhod-marketing/`.
 - [[Video Editing (ffmpeg)]] — what Jarvis can/can't do with video (e.g. PS5 gaming clips): no PS5 hardware access, no CapCut GUI automation, but real command-line editing via ffmpeg once files are on a machine that has it — confirmed on this session's machine 2026-08-24, not yet checked elsewhere.
+- [[Vault GitHub Sync]] — this vault's own git remote (`alandrum824/jarvisbrain`), the end-of-day commit/push habit, and how to resolve multi-session merge conflicts.
