@@ -31,4 +31,4 @@ Base domains: `site.api.espn.com`, `sports.core.api.espn.com`, `cdn.espn.com`, p
 - Example real-world apps (Sportly) built on it.
 
 ## Status
-Saved as a reference only — nothing built against it yet. No specific use case scoped (which sport/league, which app) as of 2026-08-17.
+**In active use as of 2026-09-05.** Verified live: `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard` returns real scheduled/live games (schedule, status, teams). Paired with [[Polymarket (Prediction Markets)]] to give Adam schedule/stats + market-implied odds together for sports decisions, on request, via plain WebFetch — no extra code, no API key, no confirmation prompt (WebFetch is already auto-allowed on the JARVIS Bridge).

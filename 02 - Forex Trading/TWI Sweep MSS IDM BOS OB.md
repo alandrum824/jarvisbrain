@@ -27,7 +27,9 @@ This reused an existing saved script slot that was previously **"TWI HTF Zone Sn
 This is a genuinely more complete implementation of the diagram than [[TWI OB Hunter]]'s MQL5 EA — that EA has no MSS/IDM stage at all (flagged as an open gap in its own note). Worth comparing behavior between the two if Adam wants to bring that distinction back into the EA.
 
 ## Status
-Visually confirmed working (real labels/zones drawn, matches the reference diagram's sequence). **Not backtested, not validated for signal quality or win rate** — this is a visualization/study tool right now, not a strategy with performance numbers behind it, unlike [[TWI OB Hunter]] which has real (if currently unprofitable) backtest data. Treat any resemblance between the two as coincidental until someone actually measures this one.
+Visually confirmed working (real labels/zones drawn, matches the reference diagram's sequence) as of 2026-09-01. **Not backtested, not validated for signal quality or win rate** — this is a visualization/study tool right now, not a strategy with performance numbers behind it, unlike [[TWI OB Hunter]] which has real (if currently unprofitable) backtest data. Treat any resemblance between the two as coincidental until someone actually measures this one.
+
+**STALE WARNING (found 2026-09-05):** this script's actual saved slot (`USER;a4a888ded0eb4c9e94602ea09e357a6e`) currently contains a DIFFERENT script — **"TWI VWAP POC OB Suite"** (VWAP bands + rolling POC + volume-spike highlighting + order-block boxes), not the Sweep→MSS→IDM→BOS→OB logic this note describes. Some later session (after 2026-09-01, exact date unknown) evidently rebuilt or repurposed this slot and never updated this note. Everything below this point describes what the script USED to be — verify against the real live source (`pine_get_source` on that script id) before trusting this note again. See [[TWI Tap & Close]] for how this was discovered.
 
 ## Related
 - [[TWI OB Hunter]] — the MQL5 EA version of a similar sweep/OB concept, missing the MSS/IDM stages this indicator has.

@@ -36,6 +36,23 @@ Tailscale's own Windows service is `Automatic`/`Running` — survives reboot on 
 
 **Status as of 2026-09-05:** bridge online, Funnel live, full round trip (`/health`, `/chat` SSE with tool use, `/session/new`, `/session/:id`, `/confirm`) verified working end-to-end through the public URL multiple times. `jarvis24.grok.me`'s own env vars (`JARVIS_BRIDGE_URL`, `JARVIS_BRIDGE_TOKEN`) are set and confirmed reaching the real bridge.
 
+## Persistent memory / session-continuity upgrade (2026-09-05)
+
+**Root cause of "feels like a new conversation":** `/chat` had no memory of "the session we were just having" independent of what the client sent — if Jarvis24 ever reconnected without passing back the same `sessionId` (app reopen, network blip, anything), the bridge just created a brand-new Claude session every time, even though the Agent SDK's own on-disk transcript was always resumable. Separately, all session state lived only in an in-memory `Map`, so a bridge restart (code update, crash, reboot) wiped it regardless.
+
+**What changed** (`C:\Users\Administrator\jarvis-bridge\src\`):
+- **`continuity.js`** (new) — atomic (temp-file-then-rename) persistence to `.sessions/state.json` (session id → Claude session id, timestamps, turns, which one is "current") and `.sessions/continuity.json` (a small pointer record: `recentTopics`, `recentFiles`, `lastUserIntent`, `currentJarvisSessionId` — not a transcript, just enough to answer "what were we doing?"). Both fail open on a corrupt file rather than crashing.
+- **`sessions.js`** — now loads persisted state on startup and saves on every mutation. `ensureSession()` changed from "no id → make a new one" to "no id → fall back to the persisted current session → only create new as a last resort." This one change is the actual fix.
+- **`server.js`** — added `GET /session/current`; `/session/new` stays explicit-only (never auto-triggered by a failed health check, dropped SSE, or reconnect).
+- **`health.js`** — was spawning a real Claude subprocess on every cache-miss poll (already patched for concurrency earlier tonight, but still fundamentally heavy). Now two tiers: a free default check (filesystem/credential existence only, no subprocess) and a real probe only on `?force=1`, cached 5 minutes. Never imports `sessions.js` — health can't create or mutate a session even by accident.
+- **`brainboot.js`** (new) — quiet orientation on each `/chat` call: workspace/vault/CLAUDE.md existence checks only (no vault content read), emits tiny `memory`/`session` SSE events (`ready`/`resumed`/`created`) rather than a visible response.
+- **`streaming.js`** — deltas now coalesce over a 25ms window instead of forwarding every raw SDK text fragment (which was often 1-3 characters) as its own SSE event; every other event type flushes the pending delta first so ordering is never disturbed. Real fix for the "choppy" feel.
+- **`agent.js`** — `runTurn` now also returns which files got touched during the turn, feeding the continuity record.
+
+**Verified live** (real bridge, real restarts, not just code review): a dedicated test session survived a full bridge process kill+restart and correctly recalled a fact ("PINEAPPLE97") given before the restart, with `claude.session.resume` (not `.start`) in the logs. Fuzzy lookups ("Gold ORB", "PromiseLand") correctly resolved to the right vault notes with real numbers, pronoun follow-ups ("what was its biggest problem?") stayed attached to the right topic, and "what were we just discussing?" after a simulated reconnect correctly recalled both a test topic and Adam's real pending question from the continuity record. No separate JARVIS-side "brain index" was built — the vault's own hand-maintained VAULT-INDEX.md + folder indexes, combined with Claude's normal Glob/Grep/Read tool use, already resolve fuzzy names correctly; building a parallel index would have duplicated that for no real gain.
+
+**Not done / honestly out of scope tonight:** `displayText`/`speechText` split for TTS-safe responses (would need a Grok-side contract change to consume it; documented as a Grok-side concern per the spec's own escape hatch). The repetitive "All systems online, sir" welcome line should now naturally stop firing on every resumed session as a side effect of the fix above (that CLAUDE.md rule only fires on a session's genuine first reply, and sessions now actually resume instead of restarting) — not verified over a long multi-day span yet, worth a real check in a few days.
+
 ## Path 2: Claude Code native Remote Control (pairs to the Claude mobile app)
 
 Claude Code ships a native **Remote Control** feature that pairs a live local session to the Claude mobile app.

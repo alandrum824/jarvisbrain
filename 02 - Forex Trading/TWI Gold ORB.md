@@ -1,5 +1,5 @@
 ---
-status: built-untested
+status: active
 project: forex-trading
 type: reference
 ---
@@ -7,7 +7,7 @@ type: reference
 
 Single-file MQL5 reimplementation of the **GOLD_ORB** EA by Ulysses O. Andulte (`github.com/yulz008/GOLD_ORB`, 2022), built 2026-09-04 at Adam's request after he sent the mcpmarket skill listing for it.
 
-**Status: compiled 0 errors / 0 warnings. Never run. No backtest exists yet.**
+**Status: backtested 2026-09-05 — a real loser as-is.** First real result, XAUUSD.sim H1, 2025-06-01 to 2026-05-31, every-tick model, $10,000 deposit: net **-$753.60**, profit factor **0.64**, only **29 trades** all year, Sharpe **-5.0**, max balance DD $1,102. Verified clean via the Tester log (correct EA loaded — `Advisors\TWIGoldORB.ex5`, no silent substitution — and the logged input dump matched compiled defaults exactly, no stale `.set` cache). Confirms the pre-backtest assessment below: fixed 400/1200-point stops don't scale with a year where gold ran 3354→4497. Not worth tuning as-is; would need ATR-scaled stops/targets instead of fixed points to be worth revisiting.
 
 ## Why it was rebuilt rather than cloned
 The upstream repo does not compile on current MT5 builds:
