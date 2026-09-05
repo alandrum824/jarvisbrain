@@ -1,0 +1,4 @@
+# Telethon session files hold a live, authenticated Telegram login -
+# equivalent to a password. Never commit these.
+*.session
+*.session-journal

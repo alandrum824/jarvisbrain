@@ -36,8 +36,8 @@ from telethon import TelegramClient, events
 from telethon.tl.types import Channel, Chat
 
 # ---------------- Fill these in ----------------
-API_ID = 0            # from my.telegram.org
-API_HASH = ""          # from my.telegram.org
+API_ID = 36168507            # from my.telegram.org
+API_HASH = "879d02035beded6a98b87732e8a579f5"          # from my.telegram.org
 # -------------------------------------------------
 
 HERE = os.path.dirname(os.path.abspath(__file__))

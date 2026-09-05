@@ -40,6 +40,7 @@ input int              MaxSwingPoints     = 8;            // how many recent swi
 input group "=== Liquidity Sweep ==="
 input int              AtrPeriod          = 14;
 input double           SweepMinATRmult    = 0.10;         // min wick beyond the swing level, as ATR multiple, to count as a real sweep
+input double           MaxSweepATRmult    = 3.0;          // invalidate the setup if the wick travels beyond this many ATR past the level -- a real trend continuation, not a liquidity grab
 input int              MaxBarsForBOS      = 8;             // bars allowed between the sweep and the confirming BOS
 
 input group "=== Order Block Zone ==="
@@ -49,7 +50,11 @@ input int              MaxActiveOBs       = 6;              // oldest pruned bey
 
 input group "=== Entry / Exit ==="
 input bool             OnePerZone         = true;           // each zone can only be traded once
-input bool             UseLiquidityTP     = true;            // true = target nearest opposite unswept swing instead of fixed RR
+input bool             UseLiquidityTP     = false;           // true = target nearest opposite unswept swing instead of fixed RR.
+                                                                // NOTE: proven a near-total no-op in practice (2026-09-02 backtest) --
+                                                                // the unswept-swing pool is almost always empty by entry time, so it
+                                                                // silently falls back to the fixed-RR target anyway. Left false so
+                                                                // the input honestly reflects what the EA actually does.
 input double           RR_Multiplier      = 2.0;             // used when UseLiquidityTP == false
 
 input group "=== Entry Timing ==="
@@ -340,33 +345,53 @@ void OnStructureBarClose()
    if(isLow)  PushSwingLow(candLow,  iTime(_Symbol, StructureTF, cand));
 
    // --- sweep detection on the bar that just closed ---
+   // Both a MIN (real stop-hunt, not noise) and MAX (real reversal, not a
+   // trend continuation blowing through the level) distance are required.
    int hIdx = LatestUnsweptHighBefore(t1);
    if(hIdx >= 0 && h1 > swHighPrice[hIdx] + atr * SweepMinATRmult && c1 < swHighPrice[hIdx])
      {
-      swHighSwept[hIdx] = true;
-      int loIdx = LatestUnsweptLowBefore(swHighTime[hIdx]);
-      if(loIdx >= 0 && !pendBear)
+      if(h1 > swHighPrice[hIdx] + atr * MaxSweepATRmult)
         {
-         pendBear = true;
-         pendBearSweepLevel = swHighPrice[hIdx];
-         pendBearStructLow  = swLowPrice[loIdx];
-         pendBearBarsWaited = 0;
-         PrintFormat("TWI OB Hunter: sell-side liquidity swept at %.5f, watching for BOS below %.5f", pendBearSweepLevel, pendBearStructLow);
+         PrintFormat("TWI OB Hunter: sweep above %.5f too large (>%.1fx ATR), treating as trend continuation not a reversal setup",
+                     swHighPrice[hIdx], MaxSweepATRmult);
+         swHighSwept[hIdx] = true; // still consumed -- don't keep re-flagging the same oversized sweep every bar
+        }
+      else
+        {
+         swHighSwept[hIdx] = true;
+         int loIdx = LatestUnsweptLowBefore(swHighTime[hIdx]);
+         if(loIdx >= 0 && !pendBear)
+           {
+            pendBear = true;
+            pendBearSweepLevel = swHighPrice[hIdx];
+            pendBearStructLow  = swLowPrice[loIdx];
+            pendBearBarsWaited = 0;
+            PrintFormat("TWI OB Hunter: sell-side liquidity swept at %.5f, watching for BOS below %.5f", pendBearSweepLevel, pendBearStructLow);
+           }
         }
      }
 
    int lIdx = LatestUnsweptLowBefore(t1);
    if(lIdx >= 0 && l1 < swLowPrice[lIdx] - atr * SweepMinATRmult && c1 > swLowPrice[lIdx])
      {
-      swLowSwept[lIdx] = true;
-      int hiIdx = LatestUnsweptHighBefore(swLowTime[lIdx]);
-      if(hiIdx >= 0 && !pendBull)
+      if(l1 < swLowPrice[lIdx] - atr * MaxSweepATRmult)
         {
-         pendBull = true;
-         pendBullSweepLevel = swLowPrice[lIdx];
-         pendBullStructHigh = swHighPrice[hiIdx];
-         pendBullBarsWaited = 0;
-         PrintFormat("TWI OB Hunter: buy-side liquidity swept at %.5f, watching for BOS above %.5f", pendBullSweepLevel, pendBullStructHigh);
+         PrintFormat("TWI OB Hunter: sweep below %.5f too large (>%.1fx ATR), treating as trend continuation not a reversal setup",
+                     swLowPrice[lIdx], MaxSweepATRmult);
+         swLowSwept[lIdx] = true;
+        }
+      else
+        {
+         swLowSwept[lIdx] = true;
+         int hiIdx = LatestUnsweptHighBefore(swLowTime[lIdx]);
+         if(hiIdx >= 0 && !pendBull)
+           {
+            pendBull = true;
+            pendBullSweepLevel = swLowPrice[lIdx];
+            pendBullStructHigh = swHighPrice[hiIdx];
+            pendBullBarsWaited = 0;
+            PrintFormat("TWI OB Hunter: buy-side liquidity swept at %.5f, watching for BOS above %.5f", pendBullSweepLevel, pendBullStructHigh);
+           }
         }
      }
 
@@ -404,11 +429,23 @@ void OnStructureBarClose()
         }
      }
 
-   // --- age out zones ---
+   // --- age out and invalidate zones ---
+   // A zone that price has already closed straight through (the far side,
+   // beyond the same buffer used for its own SL) is a busted thesis -- leaving
+   // it "active" risks a late random wick triggering a bad entry into a zone
+   // the market has already rejected outright.
    for(int i = ArraySize(obList) - 1; i >= 0; i--)
      {
       obList[i].createdBarsAgo++;
-      if(obList[i].createdBarsAgo > MaxOBAgeBars)
+      bool invalidated = obList[i].isBullish ? (c1 < obList[i].bottom - atr * OBBufferATRmult)
+                                              : (c1 > obList[i].top + atr * OBBufferATRmult);
+      if(invalidated)
+        {
+         PrintFormat("TWI OB Hunter: %s OB zone %.5f-%.5f invalidated, price closed through it",
+                     obList[i].isBullish ? "bullish" : "bearish", obList[i].bottom, obList[i].top);
+         RemoveOrderBlock(i);
+        }
+      else if(obList[i].createdBarsAgo > MaxOBAgeBars)
          RemoveOrderBlock(i);
      }
    while(ArraySize(obList) > MaxActiveOBs)

@@ -78,6 +78,12 @@ Never confirmed with TradeWithPat docs/support directly, but real backtest evide
 ## How this compares to [[TWP24 EURUSD Sets]]
 That note documents Adam's own validated-profitable config on a *different* account: 0.60 lots, grid ON, up to 3 concurrent/3 per session, rarely hit the $300/day cap — with the lesson being lot size itself (not the grid) is what blew things up when pushed too high. This note's 108.181.193.243 config (0.35 static lots, grid ON but seemingly self-contradicting via "trade only if no other open trade") is a *different* setup on a *different* account, not the same validated one. Don't treat the two as the same reference point when sizing the $800 account.
 
+## 2026-09-03 — account disconnected since last night, real cause of no American-session trades found
+
+Read the RisenAdam terminal's own Journal log directly (`.../Terminal/C3F62A8326295558A052069AC3E69E3E/logs/20260902.log`), since the mt5 MCP bridge still can't connect (`Authorization failed`, -6, same block as before). Real sequence found: at 23:13:37 (2026-09-02) account **8996721 disconnected** from AAAFxGlobal-5 Real and the TWP ORB EA on the EURUSD chart reloaded 3x in the same second — looks like a terminal restart. Immediately after, at 23:13:41, reconnection failed: `authorization on AAAFxGlobal-5 Real failed (Invalid account)`. Only Telegram-EA reload noise follows through 23:56:15, then **zero journal entries since** — confirmed via file timestamps, not just eyeballing. `terminal64.exe` (PID confirmed running) is up but not authenticated to the broker.
+
+**Real conclusion: EURUSD didn't trade the 2026-09-03 American session because the account has had no live broker connection since last night, not because of any strategy/session-timing issue.** Needs a manual re-login at the RisenAdam terminal (not headless-fixable) — check whether it's a stale password/session or the broker actually rejecting the account (invalid/locked). Also blocks TWI OB Hunter and any other EA sharing this terminal, not just TWP ORB.
+
 ## Related
 
 - [[Active Priorities]]

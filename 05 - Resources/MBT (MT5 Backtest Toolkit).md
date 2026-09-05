@@ -55,6 +55,15 @@ The `.set` file itself is the standard MT5 format — one `Key=current||default|
 
 Reusable artifacts left in place for next time: `mbt/dashboard_off.set` (this EA's full input set with drawing disabled) and `mbt/run_real_test.py` (the direct-call script pattern — copy and adjust `expert=`/`symbol=`/dates/`set_file=` for a different EA or run).
 
+## CRITICAL gotcha found 2026-09-03: the tester's cached `.set` silently overrides compiled defaults
+**The Strategy Tester reads `MQL5\Profiles\Tester\<EAName>.set` and those values override the EA's compiled-in defaults.** `run_strategy_tester` writes no inputs section into its `.ini`, so it is easy — and wrong — to assume "no `.set` means compiled defaults apply." Once that cache file exists for an EA, every later headless run silently uses it.
+
+**Real damage this caused:** a whole evening of [[TWI SR Sweep Reclaim]] experiments (v3.00/v3.10/v3.20) ran with `EntryMode=1` (stop-order entry) from a cache written hours earlier, even though the source default had been changed to market-on-close. Entries were pending stop orders that expired unfilled after `PendingExpiryBars` — an extra, undocumented filter — so reported "valid entries" counted *orders placed*, not fills. Separately, [[TWI TakeProfit SMC EA]] ran twice with `InpMaxSpreadPoints=25` after the source default was raised to 400, blocking 100% of bars both times.
+
+**How to spot it:** the tester log dumps every input at the start of each run. Read that dump and confirm the values are the ones you intended — never assume. A parameter change that "had no effect" is the signature.
+
+**Fix:** before a run whose inputs matter, either delete `MQL5\Profiles\Tester\<EAName>.set` (compiled defaults then apply) or write the intended `.set` there deliberately. Stale caches from this incident are backed up in `mbt\reports\stale_tester_sets\`.
+
 ## Other real gotchas found running it (2026-09-01)
 - **`tester.terminal_path` vs. top-level `mt5_path` disagree in `config.yaml`** — top-level `mt5_path` is RisenAdam, but `tester.terminal_path` (what `run_strategy_tester` actually launches) is **RisenMOM**. Not yet reconciled/fixed in the config; just worked around by confirming the EA is deployed to both terminals and checking RisenMOM's own symbol names before each test.
 - **RisenMOM is logged into OANDA-Demo-1, not AAAFxGlobal** — its gold symbol is `XAUUSD.sim`, not `XAUUSD` (confirmed via the [[mt5]] bridge's `mt5_get_symbols`). A bare `XAUUSD` fails with `symbol XAUUSD not exist` in the Tester log. Check the real symbol name per-broker before every run rather than assuming the plain ticker.
