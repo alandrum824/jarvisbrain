@@ -96,7 +96,7 @@ Adam's full Base44 app portfolio — discovered 2026-08-18 while working on [[Ju
 
 ## Sports / entertainment
 - Ballpark Passport — `6a0e1d202e61e45412b85cab`
-- RetroVault — `69c8ef0163fff3ee50858eba`
+- [[RetroVault (CeeloEdge)]] — `69c8ef0163fff3ee50858eba`. Real sports-pick engine, now real depth — see its own note.
 - SkyFinder — `6a3a3731b512ec1666934288`
 - MythicGuess — `69eadec72bc64b737e747f84`
 - WR Champion Trainer — `69af48b9ad8887cbb029c2f7`
