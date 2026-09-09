@@ -27,3 +27,4 @@ UI still says "Kalshi" throughout (labels, AI prompts, the `kalshi_market` field
 
 ## Related
 [[Public ESPN API]], [[Polymarket (Prediction Markets)]] — the two free data sources this app now runs entirely on.
+[[PolyEdge (Grok Build)]] — Adam's other sports-edge app, same underlying idea, separate SuperGrok-built codebase.

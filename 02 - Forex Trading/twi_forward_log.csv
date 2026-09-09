@@ -1,0 +1,2 @@
+logged_at,symbol,tf,signal_time,dir,entry,sl,tp,rr,zone_bot,zone_top,result,r,exit_price,exit_time,resolved_at
+2026-09-08T14:39:49.122955+00:00,NZDUSD,M15,2026-09-08T17:30:00,short,0.58613,0.58676,0.58487,2.00,,,win,2.00,0.58490,2026-09-09T00:00:00,2026-09-08T21:07:24.977286+00:00

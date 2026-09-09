@@ -1,0 +1,361 @@
+//@version=6
+// TWI BOS Trap Entry  -- v6
+// Model: Break of Structure -> Order Block / Breaker Block -> Trap (Inducement) sweep -> entry.
+// Built from Adam's video screenshots (XAUUSD 15M/30M), 2026-09-07.
+//
+// v2 (2026-09-08): obMaxAge 300 -> 60, momentum gate added.
+// v3 (2026-09-08): confirmClose defaults OFF -- entry on the wick tap (+0.211R vs +0.169R).
+// v4 (2026-09-08): signal info panel. The 2026-09-07 XAUUSD short lost because the stop was
+//   set to 4435 by eye when this script's own rule (SL = far side of the OB zone) put it at
+//   ~4442 -- and price peaked at 4440.69 before dropping 40 points. The levels were right;
+//   they were just never displayed as numbers. Now they are.
+// v5 (2026-09-08): stop buffer as a fraction of zone height, default 25%.
+// v6 (2026-09-08): panel now shows signal age and greys out when stale. v5 displayed the
+//   last signal forever with no age -- on a 30m gold chart it was showing a 4025 entry
+//   while price was 4404, which reads exactly like a live setup. Real hazard, fixed.
+
+indicator("TWI BOS Trap Entry", overlay = true, max_boxes_count = 100, max_lines_count = 150, max_labels_count = 300)
+
+plot(close, title = "(anchor)", display = display.none)
+
+// Inputs
+gS = "Structure"
+swingLen   = input.int(5,    "Swing lookback (pivot left/right)", minval = 2, maxval = 50, group = gS)
+bosOnClose = input.bool(true, "BOS needs a body close through the swing", group = gS)
+
+gO = "Order Block / Breaker"
+obBodyOnly = input.bool(false, "OB zone = body only (off = full wick range)", group = gO)
+obLookback = input.int(20,  "Bars to scan back for the OB candle", minval = 3, maxval = 100, group = gO)
+obMaxAge   = input.int(60,  "Drop an untouched OB after N bars",   minval = 10, group = gO)
+useBreaker = input.bool(true, "Keep violated OBs as Breaker Blocks", group = gO)
+
+gM = "Momentum gate"
+useMomGate = input.bool(true, "Block entries against active momentum", group = gM)
+momLen     = input.int(10, "Momentum lookback (bars)", minval = 3, maxval = 50, group = gM)
+showBlocks = input.bool(true, "Mark blocked signals with an x", group = gM)
+
+gI = "Trap / Inducement"
+requireIDM = input.bool(true, "Require the trap to be swept before entry", group = gI)
+idmBufPts  = input.float(0.0, "Extra sweep depth required (price units)", minval = 0, group = gI)
+
+gE = "Entry"
+// Wick tap beat close-confirmation on 5 of 7 datasets (+0.211R vs +0.169R over 270 trades).
+confirmClose = input.bool(false, "Confirm entry with a close back out of the zone", group = gE)
+rMultiple    = input.float(2.0, "Take profit (R multiple)", minval = 0.5, step = 0.5, group = gE)
+slBufPts     = input.float(0.0, "Stop buffer beyond the zone (price units)", minval = 0, group = gE)
+// Measured: zone edge +25% of zone height beat a flush zone-edge stop, +0.273R vs +0.207R
+// over 271 trades. NOT monotonic though (50% was worse than 0%), so treat the margin as soft.
+slBufZone    = input.float(0.25, "Stop buffer as fraction of zone height", minval = 0, maxval = 2, step = 0.05, group = gE)
+showRR       = input.bool(true, "Draw the SL / TP projection box", group = gE)
+
+gV = "Visuals"
+showPanel = input.bool(true, "Show signal info panel (exact levels)", group = gV)
+bullCol   = input.color(color.new(color.teal,   80), "Bullish zone", group = gV)
+bearCol   = input.color(color.new(color.maroon, 80), "Bearish zone", group = gV)
+brkCol    = input.color(color.new(color.orange, 80), "Breaker zone", group = gV)
+idmCol    = input.color(color.gray,   "Trap / IDM level", group = gV)
+bosCol    = input.color(color.silver, "BOS line",         group = gV)
+showLbls  = input.bool(true, "Show BOS / IDM / OB labels", group = gV)
+
+// Structure tracking
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low,  swingLen, swingLen)
+
+var float swingHigh    = na
+var int   swingHighBar = na
+var float swingLow     = na
+var int   swingLowBar  = na
+
+if not na(ph)
+    swingHigh    := ph
+    swingHighBar := bar_index - swingLen
+if not na(pl)
+    swingLow     := pl
+    swingLowBar  := bar_index - swingLen
+
+brokeHigh = not na(swingHigh) and (bosOnClose ? close > swingHigh : high > swingHigh)
+brokeLow  = not na(swingLow)  and (bosOnClose ? close < swingLow  : low  < swingLow)
+
+var float lastBrokenHigh = na
+var float lastBrokenLow  = na
+
+bosUp   = brokeHigh and (na(lastBrokenHigh) or swingHigh != lastBrokenHigh)
+bosDown = brokeLow  and (na(lastBrokenLow)  or swingLow  != lastBrokenLow)
+
+bullOBOffset() =>
+    int found = na
+    for i = 1 to obLookback
+        if close[i] < open[i]
+            found := i
+            break
+    found
+
+bearOBOffset() =>
+    int found = na
+    for i = 1 to obLookback
+        if close[i] > open[i]
+            found := i
+            break
+    found
+
+var float bullTop    = na
+var float bullBot    = na
+var int   bullBar    = na
+var float bullIDM    = na
+var bool  bullSwept  = false
+var bool  bullArmed  = false
+var box   bullBox    = na
+var line  bullIDMLn  = na
+var label bullIDMLbl = na
+
+var float bearTop    = na
+var float bearBot    = na
+var int   bearBar    = na
+var float bearIDM    = na
+var bool  bearSwept  = false
+var bool  bearArmed  = false
+var box   bearBox    = na
+var line  bearIDMLn  = na
+var label bearIDMLbl = na
+
+var float brkTop  = na
+var float brkBot  = na
+var bool  brkBull = false
+var box   brkBox  = na
+
+// BOS -> build the setup
+if bosUp
+    lastBrokenHigh := swingHigh
+    off = bullOBOffset()
+    if not na(off)
+        box.delete(bullBox)
+        line.delete(bullIDMLn)
+        label.delete(bullIDMLbl)
+        bullTop   := obBodyOnly ? math.max(open[off], close[off]) : high[off]
+        bullBot   := obBodyOnly ? math.min(open[off], close[off]) : low[off]
+        bullBar   := bar_index - off
+        bullIDM   := na
+        bullSwept := not requireIDM
+        bullArmed := true
+        bullBox   := box.new(bullBar, bullTop, bar_index + 10, bullBot, border_color = color.new(color.teal, 40), bgcolor = bullCol)
+        if showLbls
+            line.new(swingHighBar, swingHigh, bar_index, swingHigh, color = bosCol, style = line.style_dashed)
+            label.new(bar_index, swingHigh, "BOS", color = color.new(color.teal, 70), textcolor = color.white, style = label.style_label_down, size = size.tiny)
+
+if bosDown
+    lastBrokenLow := swingLow
+    off = bearOBOffset()
+    if not na(off)
+        box.delete(bearBox)
+        line.delete(bearIDMLn)
+        label.delete(bearIDMLbl)
+        bearTop   := obBodyOnly ? math.max(open[off], close[off]) : high[off]
+        bearBot   := obBodyOnly ? math.min(open[off], close[off]) : low[off]
+        bearBar   := bar_index - off
+        bearIDM   := na
+        bearSwept := not requireIDM
+        bearArmed := true
+        bearBox   := box.new(bearBar, bearTop, bar_index + 10, bearBot, border_color = color.new(color.maroon, 40), bgcolor = bearCol)
+        if showLbls
+            line.new(swingLowBar, swingLow, bar_index, swingLow, color = bosCol, style = line.style_dashed)
+            label.new(bar_index, swingLow, "BOS", color = color.new(color.maroon, 70), textcolor = color.white, style = label.style_label_up, size = size.tiny)
+
+// Trap / inducement
+if bullArmed and na(bullIDM) and not na(pl)
+    idmBar = bar_index - swingLen
+    if idmBar > bullBar and pl > bullTop
+        bullIDM := pl
+        bullIDMLn := line.new(idmBar, pl, bar_index + 10, pl, color = idmCol, style = line.style_dotted)
+        if showLbls
+            bullIDMLbl := label.new(bar_index, pl, "Trap / IDM", color = color.new(color.gray, 80), textcolor = color.white, style = label.style_label_left, size = size.tiny)
+
+if bearArmed and na(bearIDM) and not na(ph)
+    idmBar = bar_index - swingLen
+    if idmBar > bearBar and ph < bearBot
+        bearIDM := ph
+        bearIDMLn := line.new(idmBar, ph, bar_index + 10, ph, color = idmCol, style = line.style_dotted)
+        if showLbls
+            bearIDMLbl := label.new(bar_index, ph, "Trap / IDM", color = color.new(color.gray, 80), textcolor = color.white, style = label.style_label_left, size = size.tiny)
+
+if bullArmed and requireIDM and not bullSwept and not na(bullIDM)
+    if low < bullIDM - idmBufPts
+        bullSwept := true
+
+if bearArmed and requireIDM and not bearSwept and not na(bearIDM)
+    if high > bearIDM + idmBufPts
+        bearSwept := true
+
+// Zone upkeep
+if bullArmed and not na(bullBox)
+    box.set_right(bullBox, bar_index + 10)
+if bearArmed and not na(bearBox)
+    box.set_right(bearBox, bar_index + 10)
+if not na(bullIDMLn)
+    line.set_x2(bullIDMLn, bar_index + 10)
+if not na(bearIDMLn)
+    line.set_x2(bearIDMLn, bar_index + 10)
+if not na(brkBox)
+    box.set_right(brkBox, bar_index + 10)
+
+if bullArmed and close < bullBot
+    if useBreaker
+        if not na(brkBox)
+            box.delete(brkBox)
+        brkTop  := bullTop
+        brkBot  := bullBot
+        brkBull := false
+        brkBox  := box.new(bar_index, brkTop, bar_index + 10, brkBot, border_color = color.new(color.orange, 40), bgcolor = brkCol)
+    box.delete(bullBox)
+    line.delete(bullIDMLn)
+    label.delete(bullIDMLbl)
+    bullArmed := false
+
+if bearArmed and close > bearTop
+    if useBreaker
+        if not na(brkBox)
+            box.delete(brkBox)
+        brkTop  := bearTop
+        brkBot  := bearBot
+        brkBull := true
+        brkBox  := box.new(bar_index, brkTop, bar_index + 10, brkBot, border_color = color.new(color.orange, 40), bgcolor = brkCol)
+    box.delete(bearBox)
+    line.delete(bearIDMLn)
+    label.delete(bearIDMLbl)
+    bearArmed := false
+
+if bullArmed and bar_index - bullBar > obMaxAge
+    box.delete(bullBox)
+    line.delete(bullIDMLn)
+    label.delete(bullIDMLbl)
+    bullArmed := false
+if bearArmed and bar_index - bearBar > obMaxAge
+    box.delete(bearBox)
+    line.delete(bearIDMLn)
+    label.delete(bearIDMLbl)
+    bearArmed := false
+
+// Momentum gate
+hh = ta.highest(high, momLen)
+ll = ta.lowest(low,  momLen)
+momUp   = hh > hh[momLen] and ll > ll[momLen]
+momDown = hh < hh[momLen] and ll < ll[momLen]
+
+longBlocked  = useMomGate and momDown
+shortBlocked = useMomGate and momUp
+
+// Entries
+tappedBull = bullArmed and bullSwept and low <= bullTop and high >= bullBot
+tappedBear = bearArmed and bearSwept and high >= bearBot and low <= bearTop
+
+rawLong  = tappedBull and (confirmClose ? close > bullTop : true)
+rawShort = tappedBear and (confirmClose ? close < bearBot : true)
+
+longSignal  = rawLong  and not longBlocked
+shortSignal = rawShort and not shortBlocked
+
+var bool bullTaken = false
+var bool bearTaken = false
+if bosUp
+    bullTaken := false
+if bosDown
+    bearTaken := false
+
+fireLong  = longSignal  and not bullTaken
+fireShort = shortSignal and not bearTaken
+
+blockedLong  = rawLong  and longBlocked  and not bullTaken
+blockedShort = rawShort and shortBlocked and not bearTaken
+
+// Last-signal state, for the info panel
+var string pDir   = "none yet"
+var float  pEntry = na
+var float  pSL    = na
+var float  pTP    = na
+var float  pZoneT = na
+var float  pZoneB = na
+var int    pBar   = na
+
+if fireLong
+    bullTaken := true
+    entryL = close
+    slL    = bullBot - slBufPts - (bullTop - bullBot) * slBufZone
+    tpL    = entryL + (entryL - slL) * rMultiple
+    pDir   := "LONG"
+    pEntry := entryL
+    pSL    := slL
+    pTP    := tpL
+    pZoneT := bullTop
+    pZoneB := bullBot
+    pBar   := bar_index
+    if showRR
+        box.new(bar_index, tpL, bar_index + 20, entryL, border_color = color.new(color.teal, 50),   bgcolor = color.new(color.teal, 85))
+        box.new(bar_index, entryL, bar_index + 20, slL, border_color = color.new(color.maroon, 50), bgcolor = color.new(color.maroon, 85))
+    alert("TWI BOS Trap Entry: LONG " + syminfo.ticker + " entry " + str.tostring(entryL, format.mintick) + " SL " + str.tostring(slL, format.mintick) + " TP " + str.tostring(tpL, format.mintick), alert.freq_once_per_bar_close)
+
+if fireShort
+    bearTaken := true
+    entryS = close
+    slS    = bearTop + slBufPts + (bearTop - bearBot) * slBufZone
+    tpS    = entryS - (slS - entryS) * rMultiple
+    pDir   := "SHORT"
+    pEntry := entryS
+    pSL    := slS
+    pTP    := tpS
+    pZoneT := bearTop
+    pZoneB := bearBot
+    pBar   := bar_index
+    if showRR
+        box.new(bar_index, entryS, bar_index + 20, tpS, border_color = color.new(color.teal, 50),   bgcolor = color.new(color.teal, 85))
+        box.new(bar_index, slS, bar_index + 20, entryS, border_color = color.new(color.maroon, 50), bgcolor = color.new(color.maroon, 85))
+    alert("TWI BOS Trap Entry: SHORT " + syminfo.ticker + " entry " + str.tostring(entryS, format.mintick) + " SL " + str.tostring(slS, format.mintick) + " TP " + str.tostring(tpS, format.mintick), alert.freq_once_per_bar_close)
+
+plotshape(fireLong,  title = "Long entry",  style = shape.triangleup,   location = location.belowbar, color = color.teal,   size = size.small, text = "OB")
+plotshape(fireShort, title = "Short entry", style = shape.triangledown, location = location.abovebar, color = color.maroon, size = size.small, text = "OB")
+
+plotshape(showBlocks and blockedLong,  title = "Long blocked",  style = shape.xcross, location = location.belowbar, color = color.new(color.gray, 30), size = size.tiny)
+plotshape(showBlocks and blockedShort, title = "Short blocked", style = shape.xcross, location = location.abovebar, color = color.new(color.gray, 30), size = size.tiny)
+
+// ─────────── Signal info panel ───────────
+// Exact numbers, so the stop never has to be eyeballed off the chart again.
+var table pnl = table.new(position.top_right, 2, 8, border_width = 1, frame_width = 1, frame_color = color.gray, border_color = color.new(color.gray, 60))
+
+fmt(float v) => na(v) ? "—" : str.tostring(v, format.mintick)
+
+if showPanel and barstate.islast
+    isStale = na(pBar) ? false : (bar_index - pBar) > obMaxAge
+    dirCol = isStale ? color.new(color.gray, 40) : pDir == "LONG" ? color.new(color.teal, 40) : pDir == "SHORT" ? color.new(color.maroon, 40) : color.new(color.gray, 60)
+    risk   = na(pEntry) or na(pSL) ? na : math.abs(pEntry - pSL)
+    reward = na(pEntry) or na(pTP) ? na : math.abs(pTP - pEntry)
+    rr     = na(risk) or risk == 0 ? na : reward / risk
+
+    table.cell(pnl, 0, 0, "TWI BOS Trap", text_color = color.white, bgcolor = color.new(color.blue, 50), text_size = size.small)
+    table.cell(pnl, 1, 0, pDir,           text_color = color.white, bgcolor = dirCol,                    text_size = size.small)
+
+    table.cell(pnl, 0, 1, "Entry",  text_color = color.silver, text_size = size.small)
+    table.cell(pnl, 1, 1, fmt(pEntry), text_color = color.white, text_size = size.small)
+
+    table.cell(pnl, 0, 2, "Stop",   text_color = color.silver, text_size = size.small)
+    table.cell(pnl, 1, 2, fmt(pSL), text_color = color.new(color.red, 0), text_size = size.small)
+
+    table.cell(pnl, 0, 3, "Target", text_color = color.silver, text_size = size.small)
+    table.cell(pnl, 1, 3, fmt(pTP), text_color = color.new(color.lime, 0), text_size = size.small)
+
+    table.cell(pnl, 0, 4, "Risk",   text_color = color.silver, text_size = size.small)
+    table.cell(pnl, 1, 4, fmt(risk), text_color = color.white, text_size = size.small)
+
+    table.cell(pnl, 0, 5, "R:R",    text_color = color.silver, text_size = size.small)
+    table.cell(pnl, 1, 5, na(rr) ? "—" : str.tostring(rr, "#.##") + " : 1", text_color = color.white, text_size = size.small)
+
+    table.cell(pnl, 0, 6, "Zone",   text_color = color.silver, text_size = size.small)
+    table.cell(pnl, 1, 6, na(pZoneB) ? "—" : fmt(pZoneB) + " - " + fmt(pZoneT), text_color = color.new(color.orange, 0), text_size = size.small)
+
+    // Age: a signal from 400 bars ago is history, not a setup. Say so loudly.
+    age    = na(pBar) ? na : bar_index - pBar
+    stale  = na(age) ? false : age > obMaxAge
+    ageTxt = na(age) ? "—" : str.tostring(age) + " bars ago" + (stale ? " (STALE)" : "")
+    ageCol = stale ? color.new(color.red, 0) : color.white
+    table.cell(pnl, 0, 7, "Age",    text_color = color.silver, text_size = size.small)
+    table.cell(pnl, 1, 7, ageTxt,   text_color = ageCol, text_size = size.small)
+
+alertcondition(fireLong,  title = "TWI BOS Trap - Long",  message = "Long: BOS -> trap swept -> OB tap on {{ticker}} {{interval}}")
+alertcondition(fireShort, title = "TWI BOS Trap - Short", message = "Short: BOS -> trap swept -> OB tap on {{ticker}} {{interval}}")

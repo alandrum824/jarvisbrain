@@ -2,3 +2,5 @@
 # equivalent to a password. Never commit these.
 *.session
 *.session-journal
+__pycache__/
+*.pyc
