@@ -40,6 +40,18 @@ Adam asked to pull "the Jarvis brain file" (`ai-memory-vault`, the mind repo) fr
 
 Did not check `fullstack-agent`, `backtalk`, `ai-visualizer`, or `barehands` in this pass — scoped to just the brain repo per what was asked.
 
+## Update — 2026-09-14
+
+This session runs on a different machine (`C:\Users\Administrator`) than where the 2026-08-20/08-30 clones lived (`C:\Users\aland`) — none of the 5 repos existed here. Adam asked to check jaredrhod's GitHub for anything new; checked via the GitHub API (no `gh` CLI on this box) since there was nothing local to `git pull`.
+
+**Found:** upstream has been quiet since 2026-08-31 (nothing shipped in 2 weeks), but `fullstack-agent`, `backtalk`, `ai-visualizer`, and `barehands` were still sitting on this vault's records at their 2026-08-20 SHAs — only `ai-memory-vault` had been checked since (2026-08-30 note). Real backlog that had never been pulled anywhere: a same-day (08-30) architecture change across all four — **"Windows update path: ask your agent instead of update.bat"** — plus barehands' `add_card` now taking a position (cards stop stacking), mic-pinning-by-name in backtalk, plan-usage now drawn on every ai-visualizer face, and a real zip-skip bug fix in fullstack-agent's updater.
+
+**Action taken:** cloned all 5 repos fresh to this machine (`~/fullstack-agent`, `~/ai-memory-vault`, `~/backtalk`, `~/ai-visualizer`, `~/barehands`) — clone only, Adam's explicit call, no installer run. All landed at the current tip (`5bb159f` / `659bba9` / `84b3a6c` / `6921e1d` / `eb23bed`, all 2026-08-30). This machine still only runs the brain/vault side — backtalk (voice) and ai-visualizer (face) are cloned but not wired up or running here, same "cloned but dormant" status the 2026-08-20 table recorded on the old machine.
+
+## How to update, now that repos are cloned here
+
+Confirmed via `ai-memory-vault`/`fullstack-agent`'s own READMEs (2026-09-14): on Windows there's no `update.bat` step for the agent to run — the documented flow is Adam just says **"update everything and tell me what changed"** and the agent does real `git -C <repo> pull --ff-only` on each clone and reports the changelog. Now that all 5 are actually cloned on this machine (see the 2026-09-14 update above), that's a straight local `git pull` per repo — no need to fall back on the GitHub API workaround used today (that workaround was only needed because the clones didn't exist here yet).
+
 ## Related
 
 [[barehands]], [[voice-line]] — the two pieces from this stack actually in daily use.

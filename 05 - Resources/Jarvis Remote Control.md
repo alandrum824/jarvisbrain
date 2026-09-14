@@ -63,12 +63,15 @@ Claude Code ships a native **Remote Control** feature that pairs a live local se
 
 Once paired, the phone's Claude app connects to *that exact session* — same context, same files, same everything, because it's literally the same running process, not a copy.
 
-## Keeping it reachable: the lid
-This machine is a laptop. Closing the lid sleeps it by default, which kills the session (and voice-line, and barehands) until it's reopened. Fixed on 2026-08-18:
+## Machine topology (corrected 2026-09-14)
+This JARVIS Bridge / Claude Code machine (`C:\Users\Administrator`, Windows Server) is Adam's **VPS** — always-on, no lid, no sleep concern. **barehands, voice-line, and the webcam/mic hardware live on Adam's separate desktop machine** (the old `C:\Users\aland` paths elsewhere in this vault refer to that desktop, not this VPS). The lid-close power-management fix below was real work done on that desktop at the time, not this machine — kept for reference in case that desktop is ever the one running this bridge again, but don't apply it here.
+
+### The desktop's lid fix (historical, applies to the desktop only)
+That machine is a laptop. Closing the lid sleeps it by default, which kills the session (and voice-line, and barehands) until it's reopened. Fixed on 2026-08-18:
 - `powercfg` lid-close action was hidden by default — unhid it: `powercfg -attributes SUB_BUTTONS LIDACTION -ATTRIB_HIDE`.
 - Set to **"Do nothing" on AC power** (stays fully awake, closed, while plugged in) and **left as "Sleep" on battery** (so it doesn't overheat closed in a bag when unplugged).
 
-So: for phone access to actually work with the lid closed, the laptop needs to be on AC power.
+So: for phone access to that desktop to work with the lid closed, it needs to be on AC power. This VPS has no such concern — it's always on.
 
 ## The abandoned path: SSH + Tailscale
 First approach tried was enabling OpenSSH Server + Tailscale for true remote terminal access. Ran into a real wall: Claude Code's auto-mode classifier blocks self-triggered UAC elevation (can't launch an elevated process to install OpenSSH Server), by design — a safety rail, not a bug to route around. The full setup script still exists at `C:\Users\aland\AppData\Local\Temp\claude\setup\setup-ssh.ps1` if ever needed for something Remote Control can't do (e.g. reaching this machine when Claude Code itself isn't already running) — would need Adam to run it himself from an elevated PowerShell.
