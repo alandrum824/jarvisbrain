@@ -18,7 +18,7 @@ The recurring job behind "give me bets." This is the method Jarvis runs directly
 3. Compare Polymarket's price against that fair value.
 4. **Bet only where Polymarket is off fair value by ≥5 percentage points.** Below that, the gap doesn't reliably clear fees, spread, and noise.
 
-**Where the gaps concentrate:** popular teams. Recreational money overbets the Dodgers, Yankees, Chiefs, Lakers and similar brands, so the soft side is usually the unglamorous opponent. Also expect softness in the **first minutes after a maintenance window or market reopen**, when the book has not yet re-synced to the sharp price.
+**Where the gaps concentrate — measured, not assumed.** The original hypothesis here was that recreational money overbets brand names (Dodgers, Yankees, Chiefs), leaving the unglamorous side soft. **That was tested on 2026-09-14 against nine live MLB markets and it was wrong** — see the measurement below. Polymarket's liquid game markets track the sharp book almost exactly. Do not assume brand bias; measure it every time.
 
 ## Method notes worth keeping
 
@@ -45,12 +45,35 @@ Polymarket US was mid planned-systems-upgrade when this was built, so these are 
 | SEA @ LAA | 50.9% | 49.1% |
 | MIA @ ARI | 44.8% | 55.2% |
 
-**The three to watch first when US reopens,** because they pair a brand-name favourite with recreational crowd bias:
-- **LAD @ CIN** — fair value has the Dodgers at 66.3%. Crowd money loves the Dodgers, so if Polymarket prints them above ~71%, Cincinnati is the value side.
-- **SD @ COL** — Colorado at 55-94 is still worth 37.7% here (Coors inflates variance and they play better at home). If Polymarket pushes San Diego past ~67%, take Colorado.
-- **NYY @ MIN** — Yankees are only a 55.1% favourite on the road. Any Polymarket price above ~60% on New York is the soft side.
+**Lowest-confidence game on the board: DEN @ KC.** It is Week 1, so neither team has a single current-season data point; the price is pure preseason projection plus Chiefs narrative. Nobody — the book, the crowd, or Jarvis — actually knows much. Global Polymarket had no market for it at all under the expected slug.
 
-**Lowest-confidence game on the board: DEN @ KC.** It is Week 1, so neither team has a single current-season data point; the price is pure preseason projection plus Chiefs narrative. Highest chance of a big Polymarket-vs-sharp gap, and also the one where nobody — the book, the crowd, or Jarvis — actually knows much.
+## The measurement that changed this note (2026-09-14)
+
+Polymarket US was down, but **global Polymarket was up and trading the same MLB games**, so the comparison was run live rather than waited on. Nine of the ten games had a market (CHW @ CLE had none). Result:
+
+| Game | Polymarket (away) | Sharp FV (away) | Gap |
+|---|---|---|---|
+| LAD @ CIN | 66.5% | 66.3% | +0.2 |
+| DET @ TOR | 45.5% | 44.6% | +0.9 |
+| BAL @ NYM | 46.5% | 47.1% | −0.6 |
+| ATL @ CHC | 45.5% | 44.9% | +0.6 |
+| NYY @ MIN | 55.5% | 55.1% | +0.4 |
+| SF @ STL | 44.5% | 43.6% | +0.9 |
+| SD @ COL | 62.5% | 62.3% | +0.2 |
+| SEA @ LAA | 50.5% | 50.9% | −0.4 |
+| MIA @ ARI | 45.5% | 44.8% | +0.7 |
+
+**Largest gap on the entire board: 0.9 points. The ≥5 point trigger never came close to firing, so the correct output for this slate was no bet.**
+
+Markets were verified genuinely live, not stale: `acceptingOrders` true, order books enabled, `updatedAt` within minutes, roughly $90k-106k liquidity per market, one-cent spreads.
+
+**Three things this proves, and they should shape [[PolyEdge (Grok Build)]]'s whole design:**
+
+1. **Liquid Polymarket game markets are efficiently priced.** They are not a soft crowd book waiting to be picked off. The brand-bias assumption failed on the exact games it was supposed to work on.
+2. **The spread eats small edges.** Quotes sit one cent wide, so entry is at the ask, not the mid — roughly half a point of cost before anything else. Any "edge" under about 2 points is not real after costs.
+3. **"No bet" is the correct answer most nights, and an app that says so is working, not broken.** PolyEdge's "No high-confidence opportunities, PolyEdge is passing" is the honest output for a slate like this. The failure mode to fear is an app that manufactures picks to look busy.
+
+**So where could real edge actually live?** Not in marquee, liquid, pre-priced games. The remaining candidates worth testing, none yet validated: stale prices in the minutes after real news (lineup scratches, weather, late injury), the reopen window right after a maintenance outage before the book re-syncs, genuinely thin or novel markets that no sharp book prices at all, and live in-game pricing. Each of these needs the same treatment this hypothesis got — measured against sharp fair value before being trusted.
 
 ## Related
 - [[PolyEdge (Grok Build)]] — the app that automates this, plus the 2026-09-14 diagnosis of why its Polymarket feed reads OFFLINE.
