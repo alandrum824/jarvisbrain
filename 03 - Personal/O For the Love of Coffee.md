@@ -80,7 +80,7 @@ Grok/Chief is already managing the project skeleton — no extra bots needed rig
 - [ ] TCR onboarding (dropship/wholesale relationship set up) — inquiry sent 2026-09-17, awaiting TCR reply
 - [ ] Choose roast (family taste test)
 - [ ] Business ownership decision (sole prop / LLC / partnership etc. — Adam's call, no filing without approval)
-- [ ] EIN (not to be filed without Adam's approval — see Business Setup section below)
+- [ ] EIN — online path exhausted (VPS IP block, then IRS Assistant kickout to paper); Form SS-4 by fax is the next step, TABLED 2026-09-17 (not to be filed without Adam's approval — see Business Setup section below)
 - [ ] DBA / FBN (not to be filed without Adam's approval)
 - [ ] Local business license (not to be filed without Adam's approval)
 - [ ] California seller's permit, if required (not to be filed without Adam's approval)
@@ -101,18 +101,35 @@ Structure confirmed for the EIN application: **sole proprietorship** (Adam perso
 
 **Jarvis/Claude cannot complete this application** — it requires entering the responsible party's Social Security number, and entering an SSN into any form is off-limits categorically, no exception even with Adam's go-ahead. This is Adam's step alone.
 
-**Real gotcha hit 2026-09-17:** attempting to load the IRS EIN online tool through this VPS's browser hit the IRS's own "system is experiencing technical difficulties" page — not a real outage (mid-day Thursday, within service hours). Almost certainly the IRS blocking the VPS's datacenter/hosting IP as anti-fraud. **Fix: always apply from a normal home/mobile connection on Adam's own device, never through the VPS.**
+**Real gotcha hit 2026-09-17 (VPS attempt):** attempting to load the IRS EIN online tool through this VPS's browser hit the IRS's own "system is experiencing technical difficulties" page — not a real outage (mid-day Thursday, within service hours). Almost certainly the IRS blocking the VPS's datacenter/hosting IP as anti-fraud. **Fix: always apply from a normal home/mobile connection on Adam's own device, never through the VPS.**
 
-**Prep answers ready for the application (no SSN or address included — Adam enters those himself):**
-- Entity type: Sole Proprietor
-- Legal name of responsible party: Adam Landrum
-- Trade name / DBA: O For the Love of Coffee
-- Reason for applying: Started a new business
-- State: California
-- Principal activity: Retail trade — online/direct-to-consumer food & beverage sales
-- Principal product: Coffee
-- Employees: No
-- Closing month of accounting year: December
+**Second attempt 2026-09-17, from Adam's own device/network — different, final wall:** the IRS Online EIN Assistant returned "We apologize for the inconvenience but based on the information provided we are unable to provide you with an EIN through this online assistant. You must submit a Form SS-4 by fax or mail." This is a known IRS Assistant kickout (happens for various benign reasons, not necessarily anything wrong with the application) — the online path is closed for this attempt; **paper Form SS-4 is now the only route.**
+
+**TABLED 2026-09-17 per Adam's call — resume when he's ready.**
+
+**Paper filing path (Form SS-4):**
+- Download: https://www.irs.gov/pub/irs-pdf/fss4.pdf
+- **Fax (fastest, ~4 business days): 855-641-6935**
+- Mail (~4 weeks): Internal Revenue Service, Attn: EIN Operation, Cincinnati, OH 45999
+- Never pay a third-party site for this — direct to IRS only.
+
+**Prep answers ready to transcribe onto the form (no SSN or address included — Adam fills those, plus signature, himself):**
+- Line 1, Legal name: Adam Landrum
+- Line 2, Trade name: O For the Love of Coffee
+- Line 4a/4b, mailing address: Adam fills in
+- Line 6, county/state: Adam's county, California
+- Line 7a, responsible party: Adam Landrum
+- Line 7b, SSN of responsible party: **Adam fills in by hand — Jarvis/Claude never touches this field, no exception**
+- Line 8a, LLC?: No
+- Line 9a, entity type: Sole Proprietor
+- Line 10, reason for applying: Started new business
+- Line 11, date business started: Adam's call
+- Line 12, closing month of accounting year: December
+- Line 13, expected employees: 0
+- Line 16, principal activity: Retail
+- Line 17, principal line/product: Coffee
+- Line 18, applied for EIN before: No
+- Signature section (name/title, phone, signature, date): Adam, by hand
 
 ## Status (as of 2026-09-17)
 
@@ -122,4 +139,5 @@ Structure confirmed for the EIN application: **sole proprietorship** (Adam perso
 - Shopify/TCR fulfillment plan: **chosen, not yet connected**
 - Final roast: **not chosen** — waiting on family tasting
 - Final price: **not chosen** — waiting on roast cost
-- **Next step:** wait for samples, taste as a family, choose the winning coffee, connect that product to Shopify, prep soft launch.
+- EIN: **tabled** — online application dead-ended twice (VPS IP block, then IRS Assistant kickout requiring paper Form SS-4); fax/mail path documented above, resume when Adam's ready.
+- **Next step:** wait for samples, taste as a family, choose the winning coffee, connect that product to Shopify, prep soft launch. EIN via paper SS-4 fax whenever Adam picks it back up.
