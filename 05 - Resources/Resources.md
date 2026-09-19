@@ -27,4 +27,5 @@ Cross-project reference material, templates, and Jobs that don't belong to a sin
 - [[Video Editing (ffmpeg)]] — what Jarvis can/can't do with video (e.g. PS5 gaming clips): no PS5 hardware access, no CapCut GUI automation, but real command-line editing via ffmpeg once files are on a machine that has it — confirmed on this session's machine 2026-08-24, not yet checked elsewhere.
 - [[Vault GitHub Sync]] — this vault's own git remote (`alandrum824/jarvisbrain`), the end-of-day commit/push habit, and how to resolve multi-session merge conflicts.
 - [[StrumMaster]] — Adam's guitar-learning Base44 app: real tuner (confirmed working), real chord/song lookup, and an interactive Play Mode with real mic-based chord detection built out 2026-09-13/14.
+- [[Zapier MCP]] — claude.ai Zapier connector, live 2026-09-18: 5 apps provisioned (Drive, Sheets, Shopify, Facebook Pages, Instagram), read path tested, write actions left enabled at Adam's call; working-method quirks banked.
 - [[Finding Polymarket Edges]] — the recurring "give me bets" job: devig the sharp book, compare to Polymarket, bet only ≥5pt gaps. The edge is Polymarket's softness, not out-predicting DraftKings.

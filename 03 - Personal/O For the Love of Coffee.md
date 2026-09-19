@@ -53,9 +53,52 @@ Ordered a sampler from **Temecula Coffee Roasters (TCR)**. Preference leans bold
 
 **oh4theloveofcoffee24@gmail.com** — Adam's dedicated business email for this brand, created 2026-09-17. Use this (not Adam's personal email) for anything sent to TCR, Shopify, or other vendors on the brand's behalf going forward.
 
+## Shopify Store
+
+**Store:** `75f1s2-bj.myshopify.com` — Basic plan, USD, PDT, store contact email is the business email below. Storefront is still password-protected (pre-launch "Opening soon" page), so nothing built here is publicly visible yet.
+
+**Scope decision (2026-09-17, Adam's call, overrides the earlier split below):** Shopify also carries the full storytelling homepage (hero/brand story/Coming Soon/family memories/email capture), not just commerce. This deliberately duplicates what the Base44 site already does — Adam was shown the conflict and chose the full build anyway. Base44 is not retired; the two now overlap and will need a decision later about which is the real public front door.
+
+**What's built (2026-09-17), all on an UNPUBLISHED draft theme:**
+- Draft theme **"O For the Love of Coffee - Working Draft"** (`gid://shopify/OnlineStoreTheme/144158785634`), duplicated from the live Horizon theme. **The live theme was never touched** — Shopify's API blocks theme-file writes to the published theme anyway.
+- Brand color palette set on the draft: cream `#FBF3E7` (background), coffee brown `#4A2E1F` (foreground/primary buttons), deep navy `#2C3E66` (color1, Adam), muted purple `#7B5E82` (color2, wife). Horizon references these four tokens everywhere, so buttons/inputs/badges/drawers all inherit them from that one change.
+- Homepage (`templates/index.json`) rebuilt: hero with the locked tagline + "Our Story" button → brand story section → "COMING SOON / One roast. We're choosing it together." on a navy band → 3-up family-phrase columns → email capture headlined "Join the family before the first roast drops." with the **Save Me a Cup** button → faith line. Default empty product grid removed (no products exist; it rendered as a broken empty row).
+- Main menu: Home / Shop / Our Story / FAQ / Contact. Footer menu: Shipping / Returns & Satisfaction Policy / Contact / Search / Your Privacy Choices.
+- Four pages created **as drafts** (`isPublished: false`, invisible to visitors): Our Story, FAQ, Shipping (placeholder), Returns / Satisfaction Policy.
+
+**Revision pass (2026-09-17, second round on Adam's exact change list):**
+- **Real brand photography now in place.** Adam supplied two finished brand images ("Early Game Days" and "Family Trips") plus the logo. Uploaded all three to Shopify Files via `stagedUploadsCreate` → multipart POST → `fileCreate`: `ofltc-gameday.jpg`, `ofltc-trips.jpg`, `ofltc-logo.png`.
+- **Hero fixed.** The "outdoor/camping illustration" was never an uploaded image — Horizon's `sections/hero.liquid` falls back to its built-in `'hero-apparel-1' | placeholder_svg_tag` whenever no `image_1`/`image_2` is set. Setting a real image is the only way to remove it. Hero now uses the Early Game Days photo, height `large`, with a `to top` gradient overlay at `#1A1208B3` so the headline stays readable over a bright, busy photo.
+- **Family Trips image — resolved, now placed in its own section.** Initially held back because it has mountains, which Adam had ruled out. His clarification draws the real line: **the mountains are fine as a specific trip memory, but never as the hero or as the brand's main visual identity.** So a new **Family Trips** section sits between the memory columns and the signup — the photo alongside "Same crew. Different adventure." and copy covering road trips, Airbnb mornings, vacations, and coffee before heading out. The memory column's third line was reworded off "road trips / same crew, different adventures" so the travel beat lives in one place instead of two.
+- **Standing rule from this:** outdoors imagery is allowed only where it depicts a real, named family memory. The site overall reads family + coffee + memories, never outdoors/hiking/camping coffee.
+- **Header logo set** via theme setting `logo` = `shopify://shop_images/ofltc-logo.png`, with `logo_height` 36→56 and mobile 28→44 (a detailed circular badge is illegible at wordmark size). The PNG was given a supersampled circular alpha mask first, so the square white background doesn't sit as a white block on the cream page.
+- **Duplicate signup removed.** Horizon's stock footer carried its own "Join our email list / Get exclusive deals" block plus a second email form. Dropped the whole `footer_m9NzUG` section, leaving only copyright + policy list, so the branded "Save Me a Cup" signup is the only one on the page.
+- **Fake social links removed.** That footer also shipped `social-links` pointing at facebook.com / instagram.com / youtube.com / tiktok.com / x.com — platform homepages, not real accounts. Cleared rather than left as broken-looking placeholders; re-add when the real accounts exist.
+- **Announcement bar** changed from Horizon's stock "Welcome to our store" to "Who's grabbing the coffee?"
+- **Purple given real presence** beyond borders: memory-column headings in `#7B5E82` on cream, and the COMING SOON eyebrow in a lightened `#CDB4D4` so it reads against the navy band.
+- **Verification method used:** local `md5sum` of each minified file compared against the `checksumMd5` the Theme API reports. `templates/index.json`, `sections/footer-group.json`, and `sections/header-group.json` all matched byte-for-byte; `config/settings_data.json` was hand-assembled so its key order differs, and was verified by reading the live value back instead. Worth reusing — it catches a silent bad-path typo that a `userErrors: []` response won't.
+
+**LAYOUT LOCKED (2026-09-17, Adam's call after reviewing the draft).** The homepage order and content are settled: hero (Game Days photo + tagline) → "Coffee never really was about the coffee." → navy COMING SOON → three memory columns → Family Trips → "Join the family before the first roast drops." / Save Me a Cup / faith line. Adam specifically called out the hero telling the whole story at a glance, and confirmed the Family Trips copy ("Same crew. Different adventure." + the coffee-duty line) reads like family rather than marketing. **Don't restructure this or rewrite that copy without him reopening it** — polish only from here.
+
+**Polish pass (2026-09-17, the four items Adam asked for):**
+- Logo up ~18%: `logo_height` 56→66, `logo_height_mobile` 44→52. It was reading small on a phone.
+- Hero headline reduced 48px→40px. Done by switching the block off `type_preset: "h2"` to `custom` at `2.5rem`&#8202;—&#8202;**and explicitly setting `font` to `var(--font-heading--family)` at the same time.** Leaving a custom-preset text block on the default `var(--font-body--family)` silently drops it to the body face; that's the trap with this theme's text block. Also switched `wrap` to `balance` so the two sentences split evenly instead of one long / one short.
+- The other two items were "keep" instructions — story section and Family Trips copy untouched.
+
+**Deliberately NOT done (and why):**
+- **Settings → Brand logo** — separate from the theme header logo above, and Shopify's Admin API cannot write it. Confirmed in Shopify's own docs: the Shop resource is read-only, "only the merchant can update this information from inside the Shopify admin." The header logo is now handled in-theme; Settings → Brand (used by checkout, Shop app, etc.) still needs Adam. (The checkout-page logo *is* API-writable via `checkoutBrandingUpsert` + `fileCreate`, if that's ever wanted.)
+- **Privacy Policy / Terms of Service** — `shopPolicyUpdate` has no draft state; writing a policy publishes it instantly at a live public URL. Not appropriate for AI-improvised binding legal text. Correct path is Shopify's own Settings → Policies → "Create from template" generator, then wire the results into the footer menu.
+- **Products, prices, SKUs, roast details** — untouched, per the standing rule and the unfinished taste test.
+- **Abandoned checkout / marketing email flows** — needs a real product and checkout to configure meaningfully, and is largely dashboard-only.
+
+**Working method — previewing an unpublished theme (banked 2026-09-17):**
+- **Dead end, don't repeat:** `https://<shop>.myshopify.com/?preview_theme_id=<id>` — returns a plain-text file reading *"Theme cannot be previewed because it's missing one of these required files: layout/theme.liquid, config/settings_schema.json."* The message is a red herring; both files were verified present and the draft's file list matched the live theme exactly. That URL form is simply not a supported preview route anymore.
+- **What works:** the admin theme editor deep link, `https://admin.shopify.com/store/<store-handle>/themes/<numeric-theme-id>/editor`, or Shopify app → Sales channels → Online Store → Themes → the theme → ⋯ → Preview.
+- Anonymous fetches of the storefront return the password page, not the theme — expected while the store is pre-launch, and not a sign anything is broken.
+
 ## Fulfillment
 
-Shopify as the ecommerce engine. TCR has a Shopify fulfillment connection — customers order through Shopify, TCR roasts/labels/packs/ships. Base44 stays the branded front-end/story experience; Shopify handles product, checkout, payment, and order flow. Not yet connected — waiting on the final roast choice first.
+Shopify as the ecommerce engine. TCR has a Shopify fulfillment connection — customers order through Shopify, TCR roasts/labels/packs/ships. Base44 was originally the branded front-end/story experience with Shopify handling only product, checkout, payment, and order flow — but see the scope decision above, which moved the story content onto Shopify too. Fulfillment not yet connected — waiting on the final roast choice first.
 
 **Pricing target:** ~$20-23 for a 12 oz bag, rough target gross profit ~$6-8/bag before ads and other expenses. Final price waits on the exact all-in cost of the chosen roast.
 
@@ -87,6 +130,7 @@ Grok/Chief is already managing the project skeleton — no extra bots needed rig
 - [ ] Business bank account
 - [ ] Bookkeeping / expense tracking set up
 - [ ] Insurance needs finalized
+- [ ] Shopify store structure — draft theme, homepage, menus, and draft pages built 2026-09-17; still needs Adam's preview/approval, the Brand logo upload, and generated Privacy/Terms policies
 - [ ] Shopify connection (product/checkout/payment, tied to TCR fulfillment)
 - [ ] Test order (end-to-end order placed and received before real customers)
 - [ ] Trademark clearance and filing (word mark + logo mark)
@@ -135,6 +179,7 @@ Structure confirmed for the EIN application: **sole proprietorship** (Adam perso
 
 - Brand concept, tagline, logo direction: **locked**
 - Base44 website: **built, being polished**
+- Shopify store: **structure built on an unpublished draft theme 2026-09-17** — homepage, menus, and four draft pages done; nothing published, no products, logo and legal policies still on Adam
 - TCR samples: **ordered, in transit**
 - Shopify/TCR fulfillment plan: **chosen, not yet connected**
 - Final roast: **not chosen** — waiting on family tasting

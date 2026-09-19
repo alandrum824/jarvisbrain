@@ -17,3 +17,4 @@ Life outside work.
 - [[Automated POD Stores (Adam and Mom)]] — separate new venture: two print-on-demand stores, one for Adam and one for mom, no overhead (no fees, no inventory) — niche/products not yet decided.
 - [[Elijah - ACT Volleyball]] — son Elijah joining Boys ACT Volleyball Club for 26-27 season; negotiated a $400/month×9 payment plan with the director; registration in progress, paused pending a SportsEngine login from older son Malachi's existing account.
 - [[O For the Love of Coffee]] — family coffee brand Adam and his wife are building; Base44 site live, TCR samples ordered, Shopify fulfillment chosen, waiting on family taste test to lock the roast before pricing/launch.
+- [[PolyEdge]] — Adam's Grok-built sports prediction-market app (model vs Polymarket); live URL, the dead one not to retry, and a full review — strong data plumbing, weak model (no starting-pitcher factor, dead injury weights).
