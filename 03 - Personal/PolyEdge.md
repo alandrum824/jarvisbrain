@@ -42,5 +42,39 @@ Each pick gives a model probability, the market probability, the gap in points, 
 
 **Recommended order of work:** starting pitchers first (biggest missing input), then the confidence gate so it stops emitting picks on half a dataset, then the injury weights.
 
+## PROOF the old model is broken, not the market (2026-09-19)
+The screenshot's **#5 lean, "JAGUARS 59%, +17 pts"**, measured against two independent markets for the same game (`nfl-jax-den-2026-09-20`):
+
+| Source | Jaguars |
+|---|---|
+| PolyEdge "LEAN" | **59%** |
+| DraftKings, devigged | 42.8% |
+| Polymarket live ($583k liquidity) | 41.5% |
+
+The sharp book and the prediction market agree within 1.3 points. **The model was ~16 points wrong, and the "+17 pt edge" was simply the size of its own error.** This is the concrete case for the >8pt MODEL_SUSPECT gate: that card would never have shipped.
+Also visible in the screenshots and now explained: picks #1 and #2 were the same game (Royals/Pirates) at +10 and +11 — a dedupe failure plus an inconsistent market snapshot between the two reads.
+
+## Base44 rebuild — BUILDING 2026-09-19 (status: created, build in progress, untested)
+**Base44 app id `6aae5695dbc22f6715196ad4`** — editor: `https://app.base44.com/apps/6aae5695dbc22f6715196ad4/editor/preview`. Created fresh (no prior Base44 app matched "poly"). Adam granted "full permission" to build it through without step-by-step confirmation.
+### Build log (2026-09-19, ~1–3 AM)
+**Turn 1 produced entities only and reported `ready`.** `Pick`/`Watchlist`/`DataCache` schemas existed, but `src/App.jsx` was the untouched scaffold with no routes and `src/pages` held only auth screens. Caught by reading the code, not by trusting the status — the same "Base44's own progress claims aren't evidence" lesson already recorded in [[O For the Love of Coffee]]. **Turn 2** (re-sent with the verified ESPN JSON path and a worked devig example) built the real thing: `Live/Discover/Watchlist/Track/Sources` pages, `PickCard`/`StateBadge`/`CalibrationChart`/`AskAssistant`/`EmptyBoard` components, and four backend functions (`fetchGames`, `buildModel`, `gradePicks`, `askPolyEdge`) over `shared/{espn,polymarket,model,cache}.ts`.
+
+**What the builder got right on its own:** log-odds from a logit-0 prior, position-and-status-weighted injuries (a real table, not decoration), bullpen honestly marked unavailable so it counts toward the gate, and the full PASS / NO_ODDS / MODEL_SUSPECT / PICK state machine.
+
+**Three real defects found by review + live testing, all fixed by hand (checkpoint `6aae5c9b…` before, `6aae5d44…` after):**
+1. **Polymarket integration was dead on arrival.** It called `/markets?tag_slug=mlb`, which silently ignores the filter and returns political markets. Rewritten to the verified slug method — now **15/15 games matched**. Full detail in [[Polymarket (Prediction Markets)]].
+2. **Unclamped sigmoid.** `1/(1+Math.exp(-50))` is exactly `1.0` in float64, so a large stacked logit would display a 100% pick. Found by a reference implementation's own self-check failing. Clamped to 0.1–99.9%.
+3. **A regression I introduced and caught before it shipped:** guessed abbreviation aliases (`KC→kcr`, `SF→sfg`, `SD→sdp`, `TB→tbr`, `WSH→was`) would have broken four *working* lookups. Only `CHW→cws` and `ATH→oak` are real. Verify, never guess.
+
+**Known constraint, not yet resolved:** ESPN blocks the Base44 Worker's egress (403 on TLS/IP fingerprint), so `shared/espn.ts` falls back through public CORS proxies (allorigins, codetabs, cors.lol) with an optional `SCRAPER_API_KEY` secret. Free proxies are flaky and can vanish — this is the app's most fragile dependency and Adam has not been asked about the ScraperAPI key.
+
+**Reference implementation** for verifying the app's numbers: `polyedge_ref.py` (session scratchpad — move somewhere permanent if it stays useful). It reproduces the devig, the log-odds prior, and the pass gate, and demonstrated that a null 50% model still emits 9 picks from 15 games — proof the gate must key on data completeness first, gap size second.
+
+Spec sent to the builder: ESPN free feed (MLB/NFL/CFB) incl. probable starting pitchers; The Odds API as a **server-side secret Adam enters himself** with hourly caching for the free tier, and a visible "MARKET REFERENCE OFFLINE" state when absent; Polymarket gamma-api for market price; **log-odds model with a stated 50% prior**; importance-weighted injuries; **hard pass gate** (missing inputs or >~8pt disagreement → MODEL SUSPECT, no pick; ≥2pt after spread to qualify as a pick); dedupe by game id; local-timezone consistency; and a **calibration ledger** (auto-graded picks, hit rate, ROI, calibration curve) as the real product. Screens: Live / Discover / Watchlist / Track / Sources + Ask assistant.
+
+
+Adam's call: **fresh Base44 app** (not an upgrade of [[RetroVault (CeeloEdge)]]), same dark look as the Grok app but "premium, hot, new, future-looking," and better underneath. Data: the free ESPN feed from [[Public ESPN API]] (verified 2026-09-19: MLB scoreboard carries probable starting pitchers; injuries are a separate per-team endpoint; odds were empty only on already-Final games, upcoming games unchecked) plus Adam's free **The Odds API** key as the multi-book/Pinnacle reference. The key lives ONLY as a server-side Base44 secret entered by Adam himself, never in front-end code, the vault, or chat; the free tier is small, so cache odds. Zapier is optional (Google Sheets ledger backup), not core.
+Screenshot evidence for why the model needs fixing: the Grok app listed one game (Royals vs Pirates) twice as picks #1 and #2, and showed +15/+17-pt "leans" that contradict the measured ~1-pt market efficiency in [[Finding Polymarket Edges]].
+
 ## Related
 [[Jarvis Remote Control]] — the other Grok-hosted app, and the reason the `.grok.me` URL pattern is familiar.
