@@ -16,5 +16,6 @@ Life outside work.
 - [[Mom's eBay Store (EMarketingTX)]] — brainstorming a revamp to save her eBay store from being shut down; sales dried up, real goal is clearing house space not growth, no account access yet.
 - [[Automated POD Stores (Adam and Mom)]] — separate new venture: two print-on-demand stores, one for Adam and one for mom, no overhead (no fees, no inventory) — niche/products not yet decided.
 - [[Elijah - ACT Volleyball]] — son Elijah joining Boys ACT Volleyball Club for 26-27 season; negotiated a $400/month×9 payment plan with the director; registration in progress, paused pending a SportsEngine login from older son Malachi's existing account.
-- [[O For the Love of Coffee]] — family coffee brand Adam and his wife are building; Base44 site live, TCR samples ordered, Shopify fulfillment chosen, waiting on family taste test to lock the roast before pricing/launch.
+- [[O For the Love of Coffee]] — family coffee brand Adam and April are building, **rebranded 2026-09-22 to Nocturnal Chaos Coffee** (conversion and note rename queued). TCR app installed, Product #1 "Before the Chaos" mapped to `COWB-DRIP-12OZ-KRAFT`, DRAFT; label draft next.
+- `Nocturnal Chaos Coffee - owl logo.png` — the new brand logo (owl, black/deep purple/silver).
 - [[PolyEdge]] — Adam's Grok-built sports prediction-market app (model vs Polymarket); live URL, the dead one not to retry, and a full review — strong data plumbing, weak model (no starting-pitcher factor, dead injury weights).

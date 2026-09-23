@@ -47,6 +47,7 @@ All open work lives in one note: [[Active Priorities]]. Tag each item with its p
 
 ## Key People
 
+- **April** — Adam's wife, co-building the family coffee brand with him — now **Nocturnal Chaos Coffee** (rebranded 2026-09-22 from [[O For the Love of Coffee]]; purple carries over into the new black/deep-purple/silver owl identity). Standing rule: any photo of her must show her wearing sunglasses — never generate or publish one without.
 - **Mom, Laura Speer** — born May 27, 1963, based in Fort Worth, TX. Resells women's clothing on eBay, store `ebay.com/str/emarketingtx` — sales dried up, she's considering shutting it down; real goal is clearing house space, not growth. See [[Mom's eBay Store (EMarketingTX)]]. Also starting a separate print-on-demand store with Adam — see [[Automated POD Stores (Adam and Mom)]].
 
 ## Personal Interests
