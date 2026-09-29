@@ -1,0 +1,556 @@
+//@version=6
+// TWI SMC POI v2.0.1 (2026-09-24; research limit-cancel now mirrors the live TP rule). Two models, one engine. Confirmed bars only; conservative OHLC scoring (SL first; on a limit's fill bar only SL counts).
+// REVERSAL (default, from Adam's "Trading for Beginners" graphics), short shown, long mirrored:
+//   1 sweep: a candle wicks above the last confirmed swing high and CLOSES back below it (a raid, not a breakout)
+//   2 MSS:   within N bars a candle CLOSES below the last confirmed swing low (dead if price closes back above the swept high)
+//   3 OB:    last bullish candle at/before the top of the move; limit at its lower edge, SL above the sweep wick + buffer
+//   4 target: fixed R (default 1.5R) or structure (the low of the MSS leg)
+// CONTINUATION (v1): BOS close above last swing high -> POI = last opposing candle at the leg extreme -> pullback sweeps a post-BOS
+//   swing above the POI -> limit at POI edge -> SL beyond POI; structure target = BSL.
+// Research table: every placed setup is simulated at 1R/1.5R/2R/3R/structure, limit vs sweep-close entry,
+//   split all vs filter (Reversal: displacement left an FVG; Continuation: higher-timeframe trend agrees).
+indicator("TWI SMC POI", overlay = true, max_bars_back = 1000, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+model       = input.string("Reversal", "Model", options = ["Reversal", "Continuation"])
+tpMode      = input.string("1.5R", "Target", options = ["1R", "1.5R", "2R", "3R", "Structure"])
+swingLen    = input.int(3,    "Swing bars (each side)", minval = 1)
+mssBars     = input.int(20,   "Reversal: max bars sweep -> MSS", minval = 1)
+maxOBSearch = input.int(20,   "Max OB/POI search bars", minval = 1)
+maxSetup    = input.int(240,  "Max bars from setup start to fill", minval = 1)
+slBufPts    = input.int(30,   "SL buffer (points)", minval = 0)
+tpBufPts    = input.int(0,    "Structure TP buffer (points)", minval = 0)
+minRR       = input.float(1.0, "Min RR (Structure target only)", minval = 0.1, step = 0.1)
+useFriCut   = input.bool(true, "Friday cutoff (no setup over the weekend)")
+friCutHour  = input.int(16,   "Friday cutoff hour (exchange time)", minval = 0, maxval = 23, tooltip = "OANDA:XAUUSD exchange time is New York; gold closes Fri 17:00 NY.")
+
+grpV = "Display"
+showDropped = input.bool(false, "Show cancelled setups", group = grpV)
+keepN       = input.int(5, "Finished trades kept on chart", minval = 0, maxval = 60, group = grpV)
+showTable   = input.bool(true, "Show stats table", group = grpV)
+tblPos      = input.string("Bottom right", "Table position", options = ["Top right", "Bottom right", "Bottom left", "Top left"], group = grpV)
+colLong  = input.color(color.new(color.teal, 0),  "Long colour", group = grpV)
+colShort = input.color(color.new(color.red, 0),   "Short colour", group = grpV)
+colPOI   = input.color(color.new(color.purple, 75), "OB/POI fill", group = grpV)
+
+grpR = "Research"
+showRes   = input.bool(true, "Show research table", group = grpR)
+resPos    = input.string("Bottom left", "Research table position", options = ["Top right", "Bottom right", "Bottom left", "Top left"], group = grpR)
+trendTFin = input.timeframe("", "Continuation trend timeframe (blank = 4x chart)", group = grpR)
+
+isRev = model == "Reversal"
+pt = syminfo.mintick
+tpR = tpMode == "1R" ? 1.0 : tpMode == "1.5R" ? 1.5 : tpMode == "2R" ? 2.0 : tpMode == "3R" ? 3.0 : na
+
+// ---------- higher-timeframe structure (Continuation research filter), previous closed HTF bar, no repaint ----------
+trendTF = trendTFin == "" ? timeframe.from_seconds(timeframe.in_seconds() * 4) : trendTFin
+trendCalc() =>
+    tph = ta.pivothigh(high, swingLen, swingLen)
+    tpl = ta.pivotlow(low, swingLen, swingLen)
+    var float h1 = na
+    var float h0 = na
+    var float l1 = na
+    var float l0 = na
+    if not na(tph)
+        h0 := h1
+        h1 := tph
+    if not na(tpl)
+        l0 := l1
+        l1 := tpl
+    bool up = not na(h0) and not na(l0) and h1 > h0 and l1 > l0
+    bool dn = not na(h0) and not na(l0) and h1 < h0 and l1 < l0
+    up ? 1 : dn ? -1 : 0
+htfTrend = request.security(syminfo.tickerid, trendTF, trendCalc()[1], lookahead = barmerge.lookahead_on)
+
+// ---------- research sims ----------
+type Sim
+    bool  sh
+    float sl
+    float eL
+    float eC
+    float tgt
+    float oTop
+    float oBot
+    int   bar0
+    bool  tr
+    int   stL
+    int   stC
+    float rkL
+    float rkC
+    array<float> resL
+    array<float> resC
+    float mfeL = 0.0
+    float mfeC = 0.0
+    float cxl  = na      // live TP level: an unfilled limit is cancelled when price gets there first (mirrors the live rule)
+
+var sims    = array.new<Sim>()
+var RM      = array.from(1.0, 1.5, 2.0, 3.0)
+var rN      = array.new_float(20, 0.0)
+var rW      = array.new_float(20, 0.0)
+var rR      = array.new_float(20, 0.0)
+var mfeArrL = array.new_float()
+var mfeArrC = array.new_float()
+
+recordRes(int ei, int k, float r, bool tr) =>
+    for f = 0 to 1
+        if f == 0 or tr
+            idx = ei * 10 + k * 2 + f
+            array.set(rN, idx, array.get(rN, idx) + 1)
+            if r > 0
+                array.set(rW, idx, array.get(rW, idx) + 1)
+            array.set(rR, idx, array.get(rR, idx) + r)
+    0
+
+// advance one entry leg of a sim by one closed bar; returns true while any target is still unresolved
+stepLeg(Sim s, bool isL, bool fillBar) =>
+    e   = isL ? s.eL : s.eC
+    rk  = isL ? s.rkL : s.rkC
+    res = isL ? s.resL : s.resC
+    hitSL = s.sh ? high >= s.sl : low <= s.sl
+    if not hitSL and not fillBar
+        fav = (s.sh ? e - low : high - e) / rk
+        if isL
+            s.mfeL := math.max(s.mfeL, fav)
+        else
+            s.mfeC := math.max(s.mfeC, fav)
+    bool stillOpen = false
+    for k = 0 to 4
+        if na(array.get(res, k))
+            tpPx  = k < 4 ? (s.sh ? e - array.get(RM, k) * rk : e + array.get(RM, k) * rk) : s.tgt
+            hitTP = not fillBar and (s.sh ? low <= tpPx : high >= tpPx)
+            if hitSL
+                array.set(res, k, -1.0)
+                recordRes(isL ? 0 : 1, k, -1.0, s.tr)
+            else if hitTP
+                r = k < 4 ? array.get(RM, k) : math.abs(s.tgt - e) / rk
+                array.set(res, k, r)
+                recordRes(isL ? 0 : 1, k, r, s.tr)
+            else
+                stillOpen := true
+    stillOpen
+
+// ---------- state ----------
+var float lastHi = na
+var int   lastHiBar = na
+var bool  lastHiBroken = true
+var float lastLo = na
+var int   lastLoBar = na
+var bool  lastLoBroken = true
+var float postHi = na
+var float postLo = na
+
+var int   state   = 0      // 0 idle, 1 setup forming (Continuation: waiting sweep / Reversal: waiting MSS), 2 limit pending, 3 in trade
+var bool  isShort = false
+var int   bosBar  = na     // setup start bar (BOS bar or sweep bar)
+var float obTop = na
+var float obBot = na
+var int   obBar = na
+var float target = na      // Continuation: BSL/SSL tracking
+var float rvLevel = na     // Reversal: swept swing level
+var float rvMss   = na     // Reversal: MSS level (opposite swing)
+var float entry = na
+var float sl = na
+var float tp = na
+
+// drawings of the CURRENT setup (fixed set per trade: 3 boxes, 3 lines, 5 labels + 1 result label)
+var box   bxPOI = na
+var box   bxTP  = na
+var box   bxSL  = na
+var line  lnBOS = na
+var line  lnTgt = na
+var line  lnSw  = na
+var label lbBOS = na
+var label lbTgt = na
+var label lbSw  = na
+var label lbOrd = na
+var label lbFill = na
+
+var pastB  = array.new<box>()
+var pastL  = array.new<line>()
+var pastLb = array.new<label>()
+
+var int   nTrades = 0
+var int   nWins = 0
+var float sumR = 0.0
+var float grossW = 0.0
+var float grossL = 0.0
+var int   nSetups = 0
+var int   nPlaced = 0
+var int   nFilled = 0
+
+colGrey = color.new(color.gray, 88)
+
+killSetup() =>
+    box.delete(bxPOI), box.delete(bxTP), box.delete(bxSL)
+    line.delete(lnBOS), line.delete(lnTgt), line.delete(lnSw)
+    label.delete(lbBOS), label.delete(lbTgt), label.delete(lbSw), label.delete(lbOrd), label.delete(lbFill)
+    0
+
+extendSetup() =>
+    box.set_right(bxPOI, bar_index)
+    box.set_right(bxTP, bar_index)
+    box.set_right(bxSL, bar_index)
+    line.set_x2(lnTgt, bar_index)
+    0
+
+dropSetup(string why) =>
+    if showDropped
+        extendSetup()
+        box.set_bgcolor(bxPOI, colGrey), box.set_border_color(bxPOI, color.new(color.gray, 60))
+        box.set_bgcolor(bxTP, colGrey), box.set_bgcolor(bxSL, colGrey)
+        label.new(bar_index, isShort ? high : low, "x", style = label.style_none, textcolor = color.gray, size = size.tiny, tooltip = why)
+    else
+        killSetup()
+    0
+
+archive(label res) =>
+    array.push(pastB, bxPOI), array.push(pastB, bxTP), array.push(pastB, bxSL)
+    array.push(pastL, lnBOS), array.push(pastL, lnTgt), array.push(pastL, lnSw)
+    array.push(pastLb, lbBOS), array.push(pastLb, lbTgt), array.push(pastLb, lbSw), array.push(pastLb, lbOrd), array.push(pastLb, lbFill), array.push(pastLb, res)
+    while array.size(pastB) > keepN * 3
+        for k = 1 to 3
+            box.delete(array.shift(pastB))
+            line.delete(array.shift(pastL))
+        for k = 1 to 6
+            label.delete(array.shift(pastLb))
+    0
+
+scoreTrade(float r, float px) =>
+    txt = (r > 0 ? "WIN +" : "LOSS ") + str.tostring(r, "#.##") + "R"
+    res = label.new(bar_index, px, txt, style = (isShort == (r > 0)) ? label.style_label_up : label.style_label_down,
+                    color = r > 0 ? color.new(color.green, 20) : color.new(color.red, 20), textcolor = color.white, size = size.small)
+    extendSetup()
+    alert("TWI SMC POI: " + (isShort ? "SHORT " : "LONG ") + (r > 0 ? "hit TP" : "hit SL") + " (" + str.tostring(r, "#.##") + "R)", alert.freq_once_per_bar_close)
+    archive(res)
+
+friCut = useFriCut and dayofweek(time, syminfo.timezone) == dayofweek.friday and hour(time, syminfo.timezone) >= friCutHour
+
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+if barstate.isconfirmed
+    stateAtStart = state
+    pBar = bar_index - swingLen
+    if not na(ph)
+        lastHi := ph, lastHiBar := pBar, lastHiBroken := false
+        if state == 1 and pBar >= bosBar
+            postHi := ph
+    if not na(pl)
+        lastLo := pl, lastLoBar := pBar, lastLoBroken := false
+        if state == 1 and pBar >= bosBar
+            postLo := pl
+
+    // --- research sims (run before this bar can create a new one) ---
+    if array.size(sims) > 0
+        for i = array.size(sims) - 1 to 0
+            sm = array.get(sims, i)
+            if sm.stL == 0
+                if sm.sh ? high >= sm.eL : low <= sm.eL
+                    sm.stL := stepLeg(sm, true, true) ? 1 : 2
+                    if sm.stL == 2
+                        array.push(mfeArrL, sm.mfeL)
+                else if (sm.sh ? close > sm.oTop : close < sm.oBot) or (sm.sh ? low < sm.cxl : high > sm.cxl) or bar_index - sm.bar0 > maxSetup
+                    sm.stL := 3
+            else if sm.stL == 1
+                if not stepLeg(sm, true, false)
+                    sm.stL := 2
+                    array.push(mfeArrL, sm.mfeL)
+            if sm.stC == 1
+                if not stepLeg(sm, false, false)
+                    sm.stC := 2
+                    array.push(mfeArrC, sm.mfeC)
+            if (sm.stL >= 2 and sm.stC >= 2) or bar_index - sm.bar0 > 5000
+                array.remove(sims, i)
+
+    // order request, filled by whichever model completes a setup on this bar
+    bool  placeReq = false
+    float pE = na
+    float pS = na
+    float pT = na
+    bool  pFlag = false
+
+    // --- in trade ---
+    if state == 3
+        extendSetup()
+        hitSL = isShort ? high >= sl : low <= sl
+        hitTP = isShort ? low <= tp : high >= tp
+        if hitSL or hitTP
+            r = hitSL ? -1.0 : math.abs(tp - entry) / math.abs(entry - sl)
+            nTrades += 1
+            sumR += r
+            if r > 0
+                nWins += 1
+                grossW += r
+            else
+                grossL += -r
+            scoreTrade(r, hitSL ? sl : tp)
+            state := 0
+
+    // --- limit pending ---
+    else if state == 2
+        filled = isShort ? high >= entry : low <= entry
+        if filled
+            state := 3
+            nFilled += 1
+            box.set_bgcolor(bxTP, color.new(color.teal, 70)), box.set_bgcolor(bxSL, color.new(color.red, 70))
+            lbFill := label.new(bar_index, entry, isShort ? "SELL" : "BUY", style = isShort ? label.style_label_down : label.style_label_up,
+                                color = isShort ? colShort : colLong, textcolor = color.white, size = size.tiny)
+            alert("TWI SMC POI: " + (isShort ? "SELL" : "BUY") + " limit filled @ " + str.tostring(entry, format.mintick), alert.freq_once_per_bar_close)
+            if isShort ? high >= sl : low <= sl      // fill bar: only the stop can be proven
+                nTrades += 1
+                sumR += -1.0
+                grossL += 1.0
+                scoreTrade(-1.0, sl)
+                state := 0
+            else
+                extendSetup()
+        else
+            extendSetup()
+            closedThrough = isShort ? close > obTop : close < obBot
+            tpTaken       = isShort ? low < tp : high > tp
+            timedOut      = bar_index - bosBar > maxSetup
+            if closedThrough or tpTaken or timedOut or friCut
+                dropSetup(closedThrough ? "closed thru the zone" : tpTaken ? "target reached before fill" : timedOut ? "timeout" : "Friday cutoff")
+                state := 0
+
+    // --- CONTINUATION: waiting for the liquidity sweep ---
+    else if state == 1 and not isRev and bar_index > bosBar
+        target := isShort ? math.min(target, low) : math.max(target, high)
+        line.set_y1(lnTgt, target), line.set_y2(lnTgt, target)
+        label.set_y(lbTgt, target)
+        extendSetup()
+        ind      = isShort ? postHi : postLo
+        indValid = not na(ind) and (isShort ? ind < obBot : ind > obTop)
+        swept    = indValid and (isShort ? high > ind : low < ind)
+        touched  = isShort ? high >= obBot : low <= obTop
+        if (isShort ? close > obTop : close < obBot)
+            dropSetup("closed thru POI")
+            state := 0
+        else if bar_index - bosBar > maxSetup or friCut
+            dropSetup(friCut ? "Friday cutoff" : "timeout")
+            state := 0
+        else if not swept and touched
+            dropSetup("POI hit, no sweep")
+            state := 0
+        else if swept
+            lnSw := line.new(bar_index - 1, ind, bar_index + 1, ind, color = color.new(color.orange, 0), style = line.style_dashed)
+            lbSw := label.new(bar_index, ind, "LQ", style = label.style_none, textcolor = color.orange, size = size.tiny,
+                              tooltip = "Liquidity sweep of post-BOS " + (isShort ? "high " : "low ") + str.tostring(ind, format.mintick))
+            placeReq := true
+            pE := isShort ? obBot : obTop
+            pS := isShort ? obTop + slBufPts * pt : obBot - slBufPts * pt
+            pT := isShort ? target + tpBufPts * pt : target - tpBufPts * pt
+            pFlag := isShort ? htfTrend == -1 : htfTrend == 1
+
+    // --- REVERSAL: swept, waiting for the market structure shift ---
+    else if state == 1 and isRev and bar_index > bosBar
+        extendSetup()
+        failed = isShort ? close > rvLevel : close < rvLevel
+        if failed
+            dropSetup("closed back through the swept level")
+            state := 0
+        else if bar_index - bosBar > mssBars or friCut
+            dropSetup(friCut ? "Friday cutoff" : "no MSS in time")
+            state := 0
+        else if isShort ? close < rvMss : close > rvMss
+            span = bar_index - bosBar
+            // top (short) / bottom (long) of the move since the sweep bar
+            extOff = 0
+            for i = 0 to span
+                if isShort ? high[i] > high[extOff] : low[i] < low[extOff]
+                    extOff := i
+            legExt = isShort ? high[extOff] : low[extOff]
+            // OB = last opposing candle at/before that extreme
+            obOff = -1
+            for i = extOff to extOff + maxOBSearch
+                if i > bar_index
+                    break
+                if isShort ? close[i] > open[i] : close[i] < open[i]
+                    obOff := i
+                    break
+            // displacement FVG anywhere in the MSS leg
+            bool fvg = false
+            if extOff >= 2
+                for k = 0 to extOff - 2
+                    if isShort ? high[k] < low[k + 2] : low[k] > high[k + 2]
+                        fvg := true
+            // structure target = far end of the MSS leg
+            legFar = isShort ? low : high
+            for i = 0 to extOff
+                legFar := isShort ? math.min(legFar, low[i]) : math.max(legFar, high[i])
+            if obOff < 0
+                dropSetup("MSS but no OB candle")
+                state := 0
+            else
+                obTop := isShort ? math.max(high[obOff], legExt) : open[obOff]
+                obBot := isShort ? open[obOff] : math.min(low[obOff], legExt)
+                obBar := bar_index - obOff
+                if obTop <= obBot
+                    dropSetup("empty OB")
+                    state := 0
+                else
+                    bxPOI := box.new(obBar, obTop, bar_index, obBot, border_color = color.new(color.purple, 30), bgcolor = colPOI,
+                                     text = "OB", text_color = color.new(color.purple, 0), text_size = size.tiny)
+                    lnSw := line.new(bar_index - 1, rvMss, bar_index + 1, rvMss, color = isShort ? colShort : colLong, style = line.style_dashed)
+                    lbSw := label.new(bar_index, rvMss, fvg ? "MSS+FVG" : "MSS", style = label.style_none, textcolor = isShort ? colShort : colLong, size = size.tiny,
+                                      tooltip = "Market structure shift: close " + (isShort ? "below " : "above ") + str.tostring(rvMss, format.mintick) + (fvg ? "\nDisplacement left an FVG" : "\nNo FVG in the move"))
+                    placeReq := true
+                    pE := isShort ? obBot : obTop
+                    pS := isShort ? obTop + slBufPts * pt : obBot - slBufPts * pt
+                    pT := isShort ? legFar + tpBufPts * pt : legFar - tpBufPts * pt
+                    pFlag := fvg
+
+    // --- place the order (shared by both models) ---
+    if placeReq
+        nPlaced += 1
+        e = pE
+        s = pS
+        mkt = isShort ? close >= e : close <= e
+        if mkt
+            e := close
+        risk = math.abs(e - s)
+        t = na(tpR) ? pT : (isShort ? e - tpR * risk : e + tpR * risk)
+        reward = isShort ? e - t : t - e
+        // research candidate: same setup, both entries, all targets
+        eC  = close
+        rkC = math.abs(eC - s)
+        if risk > 0 and rkC > 0 and (isShort ? e < s and eC < s : e > s and eC > s)
+            sim = Sim.new(isShort, s, e, eC, pT, obTop, obBot, bar_index, pFlag,
+                          mkt ? 1 : 0, 1, risk, rkC, array.new_float(5, na), array.new_float(5, na))
+            if (isShort ? e - pT : pT - e) / risk < minRR
+                array.set(sim.resL, 4, -999.0)
+            if (isShort ? eC - pT : pT - eC) / rkC < minRR
+                array.set(sim.resC, 4, -999.0)
+            sim.cxl := t
+            array.push(sims, sim)
+        if (isShort ? e >= s : e <= s) or reward <= 0 or (na(tpR) and reward / risk < minRR)
+            dropSetup("RR " + str.tostring(risk > 0 ? reward / risk : 0.0, "#.##") + " below min")
+            state := 0
+        else
+            entry := e, sl := s, tp := t
+            bxTP := box.new(bar_index, isShort ? e : t, bar_index + 1, isShort ? t : e, border_color = color.new(color.teal, 50), bgcolor = color.new(color.teal, 85))
+            bxSL := box.new(bar_index, isShort ? s : e, bar_index + 1, isShort ? e : s, border_color = color.new(color.red, 50), bgcolor = color.new(color.red, 85))
+            lbOrd := label.new(bar_index, e, (isShort ? "SELL " : "BUY ") + (mkt ? "@ close " : "LIMIT ") + str.tostring(reward / risk, "#.#") + "R",
+                               style = label.style_label_left, color = color.new(isShort ? colShort : colLong, 40), textcolor = color.white, size = size.tiny,
+                               tooltip = "Entry " + str.tostring(e, format.mintick) + "\nSL " + str.tostring(s, format.mintick) + "\nTP " + str.tostring(t, format.mintick))
+            alert("TWI SMC POI (" + model + "): " + (isShort ? "SELL" : "BUY") + (mkt ? " at close " : " limit ") + str.tostring(e, format.mintick) +
+                  "  SL " + str.tostring(s, format.mintick) + "  TP " + str.tostring(t, format.mintick) + "  RR " + str.tostring(reward / risk, "#.##"),
+                  alert.freq_once_per_bar_close)
+            if mkt
+                state := 3
+                nFilled += 1
+                box.set_bgcolor(bxTP, color.new(color.teal, 70)), box.set_bgcolor(bxSL, color.new(color.red, 70))
+                lbFill := label.new(bar_index, e, isShort ? "SELL" : "BUY", style = isShort ? label.style_label_down : label.style_label_up,
+                                    color = isShort ? colShort : colLong, textcolor = color.white, size = size.tiny)
+            else
+                state := 2
+
+    // --- new setups: structure bookkeeping always runs; a setup only arms if idle ---
+    bull = not na(lastHi) and not lastHiBroken and close > lastHi
+    bear = not na(lastLo) and not lastLoBroken and close < lastLo
+    // Reversal sweeps: wick through the level, close back inside
+    swH = not na(lastHi) and not lastHiBroken and high > lastHi and close < lastHi and not na(lastLo) and lastLo < close
+    swL = not na(lastLo) and not lastLoBroken and low < lastLo and close > lastLo and not na(lastHi) and lastHi > close
+    refBar = bull ? lastHiBar : bear ? lastLoBar : na
+    refPx  = bull ? lastHi : bear ? lastLo : na
+    swLvl  = swH ? lastHi : swL ? lastLo : na
+    swBar  = swH ? lastHiBar : swL ? lastLoBar : na
+    mssLvl = swH ? lastLo : swL ? lastHi : na
+    if bull or swH
+        lastHiBroken := true
+    if bear or swL
+        lastLoBroken := true
+    canArm = stateAtStart == 0 and state == 0 and not friCut
+
+    if canArm and isRev and swH != swL
+        nSetups += 1
+        state := 1, isShort := swH, bosBar := bar_index
+        rvLevel := swLvl, rvMss := mssLvl
+        bxPOI := na, bxTP := na, bxSL := na, lnTgt := na, lbTgt := na, lnSw := na, lbSw := na, lbOrd := na, lbFill := na
+        lnBOS := line.new(swBar, swLvl, bar_index, swLvl, color = color.new(color.orange, 0), style = line.style_dotted)
+        lbBOS := label.new(bar_index, swH ? high : low, "SWEEP", style = swH ? label.style_label_down : label.style_label_up,
+                           color = color.new(color.orange, 60), textcolor = color.white, size = size.tiny,
+                           tooltip = "Liquidity sweep of the swing " + (swH ? "high " : "low ") + str.tostring(swLvl, format.mintick) + "\nMSS level: " + str.tostring(mssLvl, format.mintick))
+
+    if canArm and not isRev and bull != bear
+        sh = bear
+        span = bar_index - refBar
+        if span >= 0 and span < 900
+            extOff = 0
+            for i = 0 to span
+                if sh ? high[i] > high[extOff] : low[i] < low[extOff]
+                    extOff := i
+            legExt = sh ? high[extOff] : low[extOff]
+            obOff = -1
+            for i = extOff to extOff + maxOBSearch
+                if i > bar_index
+                    break
+                if sh ? close[i] > open[i] : close[i] < open[i]
+                    obOff := i
+                    break
+            if obOff >= 0
+                top = sh ? math.max(high[obOff], legExt) : open[obOff]
+                bot = sh ? open[obOff] : math.min(low[obOff], legExt)
+                if top > bot
+                    nSetups += 1
+                    tg = sh ? low : high
+                    for i = 0 to extOff
+                        tg := sh ? math.min(tg, low[i]) : math.max(tg, high[i])
+                    state := 1, isShort := sh, bosBar := bar_index
+                    obTop := top, obBot := bot, obBar := bar_index - obOff
+                    target := tg
+                    postHi := na, postLo := na
+                    bxTP := na, bxSL := na, lnSw := na, lbSw := na, lbOrd := na, lbFill := na
+                    bxPOI := box.new(obBar, top, bar_index, bot, border_color = color.new(color.purple, 30), bgcolor = colPOI,
+                                     text = "POI", text_color = color.new(color.purple, 0), text_size = size.tiny)
+                    lnBOS := line.new(refBar, refPx, bar_index, refPx, color = sh ? colShort : colLong, width = 1)
+                    lbBOS := label.new(bar_index, refPx, "BOS", style = label.style_none, textcolor = sh ? colShort : colLong, size = size.tiny,
+                                       tooltip = "Break of structure: close " + (sh ? "below " : "above ") + str.tostring(refPx, format.mintick))
+                    lnTgt := line.new(bar_index, tg, bar_index + 1, tg, color = color.new(color.blue, 30), style = line.style_dashed)
+                    lbTgt := label.new(bar_index, tg, sh ? "SSL" : "BSL", style = label.style_none, textcolor = color.blue, size = size.tiny,
+                                       tooltip = "Structure target (extends until the sweep, then frozen)")
+
+// ---------- stats table ----------
+pos = tblPos == "Top right" ? position.top_right : tblPos == "Bottom right" ? position.bottom_right : tblPos == "Bottom left" ? position.bottom_left : position.top_left
+var table tb = table.new(pos, 2, 6, bgcolor = color.new(color.black, 20), border_width = 1)
+if barstate.islast and showTable
+    pf = grossL > 0 ? grossW / grossL : na
+    stTxt = state == 1 ? (isRev ? (isShort ? "swept high: wait MSS" : "swept low: wait MSS") : (isShort ? "SHORT: wait sweep" : "LONG: wait sweep")) : state == 2 ? (isShort ? "SELL limit set" : "BUY limit set") : state == 3 ? (isShort ? "IN SHORT" : "IN LONG") : "scanning"
+    table.cell(tb, 0, 0, "SMC POI " + model + " " + tpMode, text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 1, 0, stTxt, text_color = color.yellow, text_size = size.tiny)
+    table.cell(tb, 0, 1, "Setups / placed / filled", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 1, 1, str.tostring(nSetups) + " / " + str.tostring(nPlaced) + " / " + str.tostring(nFilled), text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 0, 2, "Trades (W)", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 1, 2, str.tostring(nTrades) + " (" + str.tostring(nWins) + ")", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 0, 3, "Win rate", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 1, 3, nTrades > 0 ? str.tostring(100.0 * nWins / nTrades, "#.#") + "%" : "-", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 0, 4, "Total R", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 1, 4, str.tostring(sumR, "#.##") + "R", text_color = sumR >= 0 ? color.lime : color.red, text_size = size.tiny)
+    table.cell(tb, 0, 5, "PF (in R)", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 1, 5, na(pf) ? "-" : str.tostring(pf, "#.##"), text_color = color.white, text_size = size.tiny)
+
+// ---------- research table ----------
+rPos = resPos == "Top right" ? position.top_right : resPos == "Bottom right" ? position.bottom_right : resPos == "Bottom left" ? position.bottom_left : position.top_left
+var table rt = table.new(rPos, 5, 8, bgcolor = color.new(color.black, 15), border_width = 1)
+cellTxt(int idx) =>
+    n = array.get(rN, idx)
+    n > 0 ? str.tostring(array.get(rR, idx), "+#.#;-#.#") + "R " + str.tostring(100 * array.get(rW, idx) / n, "#") + "% (" + str.tostring(n, "#") + ")" : "-"
+if barstate.islast and showRes
+    fLab = isRev ? "FVG" : "trend " + trendTF
+    table.cell(rt, 0, 0, "RESEARCH " + model, text_color = color.yellow, text_size = size.tiny)
+    table.cell(rt, 1, 0, "Limit - all", text_color = color.white, text_size = size.tiny)
+    table.cell(rt, 2, 0, "Limit - " + fLab, text_color = color.white, text_size = size.tiny)
+    table.cell(rt, 3, 0, "Close - all", text_color = color.white, text_size = size.tiny)
+    table.cell(rt, 4, 0, "Close - " + fLab, text_color = color.white, text_size = size.tiny)
+    names = array.from("TP 1R", "TP 1.5R", "TP 2R", "TP 3R", "TP structure")
+    for k = 0 to 4
+        table.cell(rt, 0, k + 1, array.get(names, k), text_color = color.white, text_size = size.tiny)
+        for c = 0 to 3
+            ei = c < 2 ? 0 : 1
+            f  = c % 2
+            idx = ei * 10 + k * 2 + f
+            v = array.get(rR, idx)
+            table.cell(rt, c + 1, k + 1, cellTxt(idx), text_color = array.get(rN, idx) == 0 ? color.gray : v > 0 ? color.lime : color.red, text_size = size.tiny)
+    table.cell(rt, 0, 6, "Median MFE (R)", text_color = color.white, text_size = size.tiny)
+    table.cell(rt, 1, 6, array.size(mfeArrL) > 0 ? str.tostring(array.median(mfeArrL), "#.##") + " (" + str.tostring(array.size(mfeArrL)) + ")" : "-", text_color = color.white, text_size = size.tiny)
+    table.cell(rt, 3, 6, array.size(mfeArrC) > 0 ? str.tostring(array.median(mfeArrC), "#.##") + " (" + str.tostring(array.size(mfeArrC)) + ")" : "-", text_color = color.white, text_size = size.tiny)
+    table.cell(rt, 0, 7, "cells: total R  win%  (trades)", text_color = color.gray, text_size = size.tiny)

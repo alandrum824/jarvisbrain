@@ -199,7 +199,7 @@ input bool              TradeFriday              = true;
 input bool              CloseTradesOutsideSession= false;
 
 input group "=== Volatility / spread safety ==="
-input int               MaxSpreadPoints          = 50;
+input int               MaxSpreadPoints          = 55; // AAAFx XAUUSD broker-compatible; real-tick spread audit 2026-09-23
 input int               MinATRPoints             = 0;     // 0 = off
 input int               MaxATRPoints             = 0;     // 0 = off
 input bool              UseNewsFilter            = false; // see IsHighImpactNewsWindow() - deliberately a STUB, not wired
@@ -277,6 +277,7 @@ struct Setup
    bool              riskValid;         // false if initialRiskMoney could not be established - such a trade is flagged R_INVALID, never faked
    bool              beDone;
    bool              partialDone;
+   int               entrySession; // session at ENTRY (reporting only)
   };
 
 //====================================================================
@@ -338,6 +339,7 @@ double st_grossProfit = 0.0, st_grossLoss = 0.0;
 int    st_consecLosses = 0, st_maxConsecLosses = 0;
 int    st_sess1Trades = 0, st_sess2Trades = 0, st_sessOtherTrades = 0;
 double st_sess1R = 0.0, st_sess2R = 0.0, st_sessOtherR = 0.0;
+double st_sumCommission = 0.0, st_sumSwap = 0.0;   // reporting only - summed once per finalized position
 
 //--------------------------------------------------------------------
 // SWEEP-DEPTH BUCKETS
@@ -1045,6 +1047,7 @@ void ResetSetup(Setup &s, bool isShort, string reason)
    s.entryPrice       = 0.0;  s.entrySL = 0.0; s.entryRisk = 0.0;
    s.initialRiskMoney = 0.0;  s.riskValid = false;
    s.beDone           = false; s.partialDone = false;
+   s.entrySession     = 0;
   }
 
 void MarkSwingSwept(double price, bool isHigh)
@@ -1758,6 +1761,7 @@ void TryEnter(Setup &s)
    s.beDone     = false;
    s.partialDone= false;
    s.state      = TRADE_ACTIVE;
+   s.entrySession = CurrentSession();
 
    // ---- freeze InitialRiskMoney: the R-multiple denominator, NEVER
    //      recomputed after this point regardless of BE/trail/partials.
@@ -1863,6 +1867,8 @@ void RecordClosedTrade(Setup &s)
 
    double fees = 0.0;   // MT5's deal model exposes profit/commission/swap only - no separate broker "fee" field on this account
    double netPnL = grossProfit + commission + swap + fees;
+   st_sumCommission += commission;   // reporting only
+   st_sumSwap       += swap;         // reporting only
    double profit = netPnL;   // win/loss classification and dollar P&L stats use the same authoritative net figure
 
    // ---- R accounting: InitialRiskMoney is FROZEN at entry, never
@@ -1883,7 +1889,7 @@ void RecordClosedTrade(Setup &s)
    else                { st_breakevens++; }
 
    int b = s.depthBucket;
-   int sess = CurrentSession();
+   int sess = s.entrySession;
 
    if(!rInvalid)
      {
@@ -2056,9 +2062,13 @@ void PrintSummary()
    PrintFormat(" BUY  : %d trades, %d wins, total %.2fR", st_buyTrades,  st_buyWins,  st_buyR);
    PrintFormat(" SELL : %d trades, %d wins, total %.2fR", st_sellTrades, st_sellWins, st_sellR);
    Print("---------------------------------------------------------------------");
-   PrintFormat(" Session 1 : %d trades, total %.2fR", st_sess1Trades, st_sess1R);
-   PrintFormat(" Session 2 : %d trades, total %.2fR", st_sess2Trades, st_sess2R);
-   PrintFormat(" Outside   : %d trades, total %.2fR", st_sessOtherTrades, st_sessOtherR);
+   PrintFormat(" Session 1 (by entry time)       : %d trades, total %.2fR", st_sess1Trades, st_sess1R);
+   PrintFormat(" Session 2 (by entry time)       : %d trades, total %.2fR", st_sess2Trades, st_sess2R);
+   PrintFormat(" Outside session (by entry time) : %d trades, total %.2fR", st_sessOtherTrades, st_sessOtherR);
+   Print("---------------------------------------------------------------------");
+   PrintFormat(" Total commission             : $%.2f", st_sumCommission);
+   PrintFormat(" Total swap                   : $%.2f", st_sumSwap);
+   Print(" NOTE: commission is taken from the tester's symbol specification. $0 means the tester assumed no commission; live AAAFx commission must be verified separately.");
    Print("---------------------------------------------------------------------");
    Print(" SWEEP DEPTH ANALYSIS - does penetration depth predict anything?");
    PrintFormat(" depth filter was %s",

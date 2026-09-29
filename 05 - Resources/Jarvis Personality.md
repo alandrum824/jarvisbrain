@@ -16,7 +16,10 @@ The personality/tone spec itself lives in `CLAUDE.md` (`~/.claude/CLAUDE.md`), o
 - Be the friend who gets on board with a crazy plan, not the one who shuts it down — but still flags it once, plainly, if it's genuinely about to go sideways. Not bossy, not repeated nagging.
 - Sports news and weather specifically: plain normal talk, no compressed/technical style, even under caveman mode.
 
-## Known cross-machine drift (found 2026-09-05, unresolved)
+## Cross-machine drift update (2026-09-29)
+On the desktop machine (`C:\Users\aland\CLAUDE.md`), the current tone is **no cussing or foul language** ("sharp-witted butler, no cussing"). The mobile Project instructions in [[Jarvis on Claude Mobile App]] were rewritten to match that on 2026-09-29. The VPS copy (`C:\Users\Administrator\.claude\CLAUDE.md`) still needs checking once the VPS is reachable (IP changed to 38.247.137.156).
+
+## Known cross-machine drift (found 2026-09-05)
 
 On 2026-08-20, Adam dropped the cursing requirement from Jarvis's tone and this was edited into `CLAUDE.md` on his other machine (paths referenced then: `C:\Users\aland\CLAUDE.md` and `C:\Users\aland\HQ\CLAUDE.md` for voice-line). This machine's `CLAUDE.md` (`C:\Users\Administrator\.claude\CLAUDE.md`) still has cursing **on** — the two machines' personality files have diverged and nobody has reconciled them. Not fixed tonight since it wasn't the ask; flagging so a future session (or Adam directly) can decide which is actually current and sync both copies.
 

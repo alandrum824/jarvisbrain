@@ -5,19 +5,35 @@ type: plan
 ---
 # O For the Love of Coffee
 
+> **2026-09-29: the current project home is the folder [[Nocturnal Chaos Coffee]]** (Adam's briefing). This note is now the history/detail file. On 9/29, at Adam's "Yes," it was updated to match the briefing on seven points: the coffee (French Roast), the roast description, the tagline order, shipping, the label, the social drafts, and the palette. The old values are kept only as "until 9/29" markers.
+
 Family coffee brand Adam is building with his wife, April. Not a laptop/productivity/hipster-café brand — it's about family, connection, sarcasm, memories, and traditions: kitchen-table coffee, school runs, sports mornings, road trips, family gatherings, nostalgic small-town/cozy-diner energy, Disneyland days, Airbnb mornings, Christmas lights and movies, cabin trips, and the ordinary mornings where everybody wakes up half-asleep and gets talkative once the coffee kicks in. Faith/family values run underneath but the copy should never turn preachy.
 
 ## REBRAND LOCKED (Adam, 2026-09-22 late evening): Nocturnal Chaos Coffee
 
 **Nocturnal Chaos Coffee REPLACES O For the Love of Coffee as the umbrella brand. The old name is retired.** No second store, no sub-brand. Adam made this call after seeing the brand-name-change conflict flagged.
 
-- **Hierarchy:** Nocturnal Chaos Coffee → Before the Chaos → TCR Cowboy Blend (`COWB-DRIP-12OZ-KRAFT`) underneath.
+- **Hierarchy (updated 2026-09-29):** Nocturnal Chaos Coffee → Before the Chaos → **TCR French Roast (`FRENCH-DRIP-12OZ-KRAFT`)** underneath. French Roast won the family blind tasting; Cowboy Blend is #2 and not a launch product. (Until 9/29: Cowboy Blend, `COWB-DRIP-12OZ-KRAFT`.)
 - **Logo:** an owl holding a black steaming mug, with "Nocturnal Chaos Coffee" script over black, deep purple, and silver. File: `03 - Personal/Nocturnal Chaos Coffee - owl logo.png` (1254x1254 PNG on solid black). It replaces the circular family logo.
 - **Keep:** the family story and voice, the locked tagline, and the approved lines. Only the name and identity change.
 - **Conversion scope (NOT STARTED — queued):** Shopify (shop name, draft theme name, header logo `ofltc-logo.png`, homepage/pages text), the Base44 site, social drafts (none found in the vault so far), vault notes, and brand files. **Everything stays Private/DRAFT until final checks.** Base44 is already published publicly, so edit without clicking Publish. Rename this vault note to `Nocturnal Chaos Coffee` (do it in Obsidian, or fix every `[[O For the Love of Coffee]]` link by hand; in old daily notes use `[[Nocturnal Chaos Coffee|O For the Love of Coffee]]` so the log text stays true).
-- **Open items the rebrand creates:** (1) site/theme palette: the old cream/brown/navy/purple doesn't match the owl's black/deep purple/silver; Adam hasn't said whether the whole site moves to the new palette; (2) the business email `oh4theloveofcoffee24@gmail.com` still carries the old name and is the Shopify owner and TCR contact; (3) SS-4 prep "Line 2, Trade name" below must become Nocturnal Chaos Coffee before faxing.
+- **Open items the rebrand creates:** (1) ~~site/theme palette~~ **decided 2026-09-29: black, deep purple and silver only, no gold** (the old cream/brown/navy/purple is retired; the Shopify draft theme and Base44 still carry it until they're converted, on Adam's go); (2) the business email `oh4theloveofcoffee24@gmail.com` still carries the old name and is the Shopify owner and TCR contact; (3) SS-4 prep "Line 2, Trade name" below must become Nocturnal Chaos Coffee before faxing.
 - **Label draft direction (Adam):** 900x1500. **Not solid black edge to edge on white stock.** Use a contained black/deep-purple panel with safe margins so a slightly off trim doesn't show an ugly white edge. Top: brand/logo. Middle: Before the Chaos plus an optional short tagline. Bottom required block, in order: Drip Ground Coffee / Net Wt 12 oz (340g) / Ingredients: Coffee / Roasted by: Temecula Coffee Roasters, Temecula, CA 92590, with the last two lines together and nothing between them. Send it to TCR for email review first.
 - **FINAL LABEL PRINTING ON HOLD** until **both** "Nocturnal Chaos Coffee" and "Before the Chaos" pass the name-check process **and** TCR has reviewed the draft.
+- **LABEL UPDATE (Adam, 2026-09-29):** a **new master label** (moon, mountains, owl, "Your cup before the chaos", a real QR code "SCAN TO SHOP" linking to the store) was **submitted in the TCR app on Sep 28**. Review takes up to 3 business days. **Never show it publicly as final.** Launch order from here, each step only on Adam's go: TCR approves the label → card on file in the TCR app → test order → launch. The mountains are part of Adam's own label art. (The 9/24 emailed draft below is superseded.)
+
+## TWO-TRACK PLAN APPROVED (Adam, 2026-09-24 ~04:30 PT) + status corrections
+- ~~LABEL: the Before the Chaos draft was EMAILED to TCR for review on 2026-09-24 from the coffee Gmail. Do NOT recreate or resend. No upload, no print.~~ **Superseded 2026-09-29: the new master label was submitted in the TCR app on Sep 28 (see the label update above).**
+- **Track 1 — audience:** the Base44 site becomes a Nocturnal Chaos Coffee **waitlist page** centred on **Save Me a Cup** (goal: emails before the store opens). **Base44 changes stay DRAFT until Adam approves publishing.** Draft TikTok/Reels/Facebook content around: "We tested 6 coffees so you don't have to" (honest ranking Cowboy #1, Peru #2, Bali Blue Moon #3, Six Bean #4, Breakfast Blend #5, Mexico #6), Adam + April at the kitchen table (April in sunglasses in ANY public family image), sports mornings, school runs, road trips, early mornings, "Your cup before the chaos", label/design behind the scenes, **French Roast arriving Saturday: tasting only, no product announcement**. **Nothing is posted without Adam's approval. No paid ads.**
+- **Track 2 — gates:** (1) preliminary name screening (USPTO exact + confusingly similar, Class 030 focus, plus a web/business/social search), reported only as *no obvious conflict / possible conflict / high-risk conflict*, **never "cleared"**; (2) social handle availability on IG/TikTok/FB, **kept separate from trademark conclusions; no accounts claimed or created**; (3) TCR label: waiting; (4) Shopify stays **Opening Soon ON, Before the Chaos DRAFT, $24.99, COWB-DRIP-12OZ-KRAFT**; the store display-name rename is Adam's Admin task; (5) ~~French Roast arrives Sat 2026-09-26: run the Cowboy vs French Roast head-to-head~~ **Done: French Roast won the family blind tasting and is now Before the Chaos (Adam, 2026-09-29).**
+- **DO NOT (yet):** public product launch, label printing, paid ads, social posting, new supplier, paid TCR tier, card charge without Adam, trademark filing without Adam. ("Chaos Wrangler" for a future Cowboy product: don't use it; possible conflict with the WRANGLER marks.)
+- **Report format for this plan:** NAME CHECK — NOCTURNAL CHAOS COFFEE / NAME CHECK — BEFORE THE CHAOS / SOCIAL HANDLE STATUS / WAITLIST DRAFT READY / BLOCKERS / RECOMMENDED NEXT ACTION.
+
+### Track 1/2 execution results (2026-09-24 ~04:30–05:00 PT)
+- **Social handles (availability ≠ trademark):** IG **@nocturnalchaos TAKEN** (private personal account "Camille Gold"); IG @nocturnalchaoscoffee, @nocturnalchaos.coffee, @nocturnalchaoscoffeeco show "Profile isn't available" = **appear free**. TikTok **@nocturnalchaos TAKEN** (personal, 6.4K followers); @nocturnalchaoscoffee, @nocturnalchaos.coffee, @nocturnal.chaos.coffee, @nocturnalchaoscoffeeco, @drinknocturnalchaos = "user not found" = **appear free**. Facebook /nocturnalchaoscoffee and /nocturnalchaos: **inconclusive** (FB shows the same "content isn't available" for missing and restricted pages). True availability is only confirmed at signup. **No accounts created.**
+- **Base44 site (app `6aab7ba915737a827d381b64`) — correction:** the code was ALREADY partly rebranded to "Nocturnal Chaos Coffee" (hero, nav, title, bag mockup) by an earlier session/tool; the vault said the conversion hadn't started. **Critical bug found and fixed in the draft: the "Save Me a Cup" forms never saved anything** (local state + a TODO). Draft changes: new entity file `base44/entities/WaitlistSignup.jsonc` (email, first_name, source; RLS: admin-only read/update/delete, public create); `src/lib/waitlist.js` `joinWaitlist()`; both forms (join section + coffee card) now save, with error states; join section re-copied to "Save me a cup. / Your cup before the chaos. / building this at our kitchen table"; new `TastingResults.jsx` "We tested 6 coffees so you don't have to" (real notes only, "Round two is this weekend," signed Adam & April) placed after The Coffee; hero + nav CTAs now "Save Me a Cup" → `/#join`. Checkpoints: before = `6ab58f915c77c4afc1acfd53`, draft = `6ab59133b774011806109504`. **NOT PUBLISHED. Build + signup NOT verified by Jarvis** (the MCP token can't open the preview; Chrome isn't signed into Base44, and signing in is Adam's step). The site palette is still the old cream/navy; per Adam (2026-09-29) the brand is black/deep purple/silver only, so it moves when he gives the go.
+- **WAITLIST TEST PASSED (2026-09-24, Adam in the Base44 Preview):** a signup through the join-section "Save Me a Cup" form stored as WaitlistSignup `6ab59eafd643624f9ba07089` (first_name Adam, email `oh4theloveofcoffee24+waitlist-test@gmail.com`, source join-section, 2026-09-24T22:05:35Z), verified by Jarvis via query_entities. Caveat: it was submitted while signed in (created_by_id set); a logged-out visitor signup is untested until the site is public. Still NOT published.
+- **Social drafts:** [[Nocturnal Chaos Coffee - Social Drafts]] — 9 post drafts + a comment-reply bank. Nothing posted.
 
 ## Working Rules for AI (MASTER — 2026-09-22, Adam's standing instructions for this project)
 
@@ -25,7 +41,7 @@ Family coffee brand Adam is building with his wife, April. Not a laptop/producti
 
 **Do NOT, without Adam's explicit approval:**
 - Switch suppliers away from TCR
-- Publish French Roast as a product (tasting-only right now)
+- Publish or change any product (French Roast is Before the Chaos as of 2026-09-29; the Shopify product stays DRAFT)
 - Remove the store's "Opening Soon" / password protection
 - Buy paid apps or join paid TCR program tiers
 - Finalize/print labels
@@ -41,7 +57,8 @@ Family coffee brand Adam is building with his wife, April. Not a laptop/producti
 
 ## Brand
 
-**Tagline (locked):** "The first cup gets us talking. The second gets us in trouble."
+**Product tagline (Adam, 2026-09-29):** "Your cup before the chaos."
+**Optional creative line (don't force it everywhere):** "The first cup gets us talking. The second gets us in trouble." (Until 9/29 this was the locked main tagline.) Current voice spec: [[Brand & Voice]].
 
 **Voice:** warm, real, slightly sarcastic/funny, nostalgic, family-owned, not corporate, not coffee-snob. Summary line: **"Looks cozy. Talks back."** Avoid corporate/luxury/"rich people"/hustle-culture/tech-laptop language and generic inspirational coffee quotes. Supporting lines already approved (use sparingly so the main tagline stays special):
 - "Who's grabbing the coffee?"
@@ -50,11 +67,9 @@ Family coffee brand Adam is building with his wife, April. Not a laptop/producti
 - "Same crew. Different adventure."
 - "A few sips away from liking each other again."
 - "Coffee isn't the memory. It's usually there when the memory happens."
-- "Your cup before the chaos." (Product #1 supporting line — see below)
+**Visual identity (updated 2026-09-29):** the owl logo; **black, deep purple, and silver only. No gold.** No occult symbols, and no moons or symbols on the owl's forehead. (Until 9/29: warm cream/ivory, coffee brown, deep navy, subtle purple; that palette is retired.)
 
-**Visual identity:** warm cream/ivory base, coffee brown, deep navy blue, subtle purple (purple matters to April, blue to Adam — both tasteful and subtle, not loud). Nostalgic, warm, family-centered — a little like an old favorite holiday movie or a cozy small-town/New York winter coffee moment, but works year-round.
-
-**Logo (locked):** circular, story-rich, family life + coffee mugs + sports/travel/cozy imagery, subtle blue and purple, carries the tagline. Direction is chosen — do not redesign from scratch. April also likes a simpler secondary mark concept: **O + heart/love + coffee bean**, reading visually as "O + Love + Coffee" — a candidate for a simplified/small-space version (favicon, packaging accent), not a replacement for the main circular logo.
+**Old logo (retired 2026-09-22, replaced by the owl):** circular, story-rich, family life + coffee mugs + sports/travel/cozy imagery, subtle blue and purple, carries the tagline. Direction is chosen — do not redesign from scratch. April also likes a simpler secondary mark concept: **O + heart/love + coffee bean**, reading visually as "O + Love + Coffee" — a candidate for a simplified/small-space version (favicon, packaging accent), not a replacement for the main circular logo.
 
 **Faith:** God is the foundation of the business, but the brand stays welcoming, not preachy. Reflected subtly — small scripture references, a quiet packaging detail, or a line like "Built with faith. Served with love. Everyone is welcome at the table."
 
@@ -97,15 +112,14 @@ Benchmark tested: **Starbucks Espresso Roast** — bold, smooth, no sourness, bu
 
 **Ideal coffee profile (locked from this tasting): bold + smooth + low perceived acidity + clean finish.** Avoid: sourness, tobacco-heavy finish, burnt flavor, smoky flavor, flavored-coffee character.
 
-**French Roast — tasting-only right now.** An 8oz bag has been ordered from TCR. **Do NOT create or publish it as a product until Adam approves it after tasting.** If it passes, it may become Product #2, possibly under the name **"Last Cup"** — that name is not yet cleared for label use.
+**French Roast — WON (Adam, 2026-09-29).** It beat Cowboy Blend in the family blind tasting and is now the coffee under Before the Chaos. Cowboy is #2 and not a launch product. (The "Last Cup" Product #2 idea is moot.)
 
-## Product #1 — Before the Chaos
+## Product #1 — Before the Chaos (current spec: [[Product - Before the Chaos]])
 
-- **Supplier product underneath:** TCR Cowboy Blend, SKU `COWB`.
-- **Customer-facing product name: Before the Chaos.** Supporting line: **"Your cup before the chaos."**
-- **Positioning:** a smooth medium-dark everyday coffee for busy mornings, school runs, work, sports mornings — those few quiet minutes before the whole house starts moving.
-- **Do NOT theme this product Western/cowboy.** "Cowboy Blend" is only the supplier-side name underneath; the customer-facing brand and copy must stay family/mornings-themed, never Western.
-- **Avoid saying "dark roast only"** — Before the Chaos is medium-dark everyday coffee.
+- **Supplier product underneath (updated 2026-09-29):** **TCR French Roast, 12 oz, drip ground, kraft bag, SKU `FRENCH-DRIP-12OZ-KRAFT`**, $24.99, Shopify product DRAFT. (Until 9/29: Cowboy Blend, `COWB`.)
+- **Customer-facing product name: Before the Chaos.** Tagline: **"Your cup before the chaos."**
+- **Approved product line (don't reword it into anything stronger):** "a bold, smooth dark roast with a clean finish, without the sharp sourness." (Until 9/29 this note said medium-dark and "avoid saying dark roast only"; retired.)
+- **Do NOT theme this product Western/cowboy.** The customer-facing brand and copy stay family/mornings-themed, never Western.
 
 **Approved product copy (current):**
 > The first cup gets us talking. The second gets us in trouble.
@@ -120,7 +134,7 @@ Benchmark tested: **Starbucks Espresso Roast** — bold, smooth, no sourness, bu
 >
 > **Save Me a Cup**
 
-**Margin estimate:** TCR planned COGS $15.95/bag; retail $24.99; approx. gross profit **$9.04/bag before card fees**. Shipping stays separate, priced at TCR's calculated shipping rate. No launch discount right now.
+**Shipping (Adam, 2026-09-29):** TCR's dropship price **includes shipping** to all 50 states, APO/FPO and PO boxes (U.S. territories excluded), and **free shipping is set in Shopify.** **Margin: needs redoing** with the French Roast dropship price (shipping included); not in the vault yet. (Until 9/29: Cowboy COGS $15.95, shipping charged separately, ~$9.04/bag gross; retired.) No launch discount right now.
 
 ## Business Email
 
@@ -131,7 +145,7 @@ Benchmark tested: **Starbucks Espresso Roast** — bold, smooth, no sourness, bu
 **Store:** `75f1s2-bj.myshopify.com` — Basic plan, USD, PDT, store contact email is the business email above. **Storefront is still PRIVATE / password-protected ("Opening Soon")** — nothing here is publicly visible yet, and that stays true until the Opening Soon exit conditions below are met.
 
 **Product live in the store (confirmed 2026-09-22):**
-- **Before the Chaos** — $24.99, SKU **`COWB-DRIP-12OZ-KRAFT`** (TCR-generated 2026-09-22: Cowboy Blend / 12oz / drip grind / kraft bag, Adam's call; replaced bare `COWB`, verified via API), status **DRAFT** (not visible to customers)
+- **Before the Chaos** — $24.99, SKU **`FRENCH-DRIP-12OZ-KRAFT`** (French Roast / 12oz / drip / kraft, per Adam 2026-09-29; not re-verified via API by Jarvis), status **DRAFT** (not visible to customers). (Until 9/29: `COWB-DRIP-12OZ-KRAFT`, verified via API 2026-09-22.)
 - Inventory tracking **off**; continue selling at 0 quantity — **no fake inventory**
 - Fulfillment still waiting on the official TCR app (see below)
 - No product photos yet
@@ -158,7 +172,7 @@ Benchmark tested: **Starbucks Espresso Roast** — bold, smooth, no sourness, bu
 - **Real brand photography now in place.** Adam supplied two finished brand images ("Early Game Days" and "Family Trips") plus the logo. Uploaded all three to Shopify Files via `stagedUploadsCreate` → multipart POST → `fileCreate`: `ofltc-gameday.jpg`, `ofltc-trips.jpg`, `ofltc-logo.png`.
 - **Hero fixed.** The "outdoor/camping illustration" was never an uploaded image — Horizon's `sections/hero.liquid` falls back to its built-in `'hero-apparel-1' | placeholder_svg_tag` whenever no `image_1`/`image_2` is set. Setting a real image is the only way to remove it. Hero now uses the Early Game Days photo, height `large`, with a `to top` gradient overlay at `#1A1208B3` so the headline stays readable over a bright, busy photo.
 - **Family Trips image — resolved, now placed in its own section.** Initially held back because it has mountains, which Adam had ruled out. His clarification draws the real line: **the mountains are fine as a specific trip memory, but never as the hero or as the brand's main visual identity.** So a **Family Trips** section sits between the memory columns and the signup — the photo alongside "Same crew. Different adventure." and copy covering road trips, Airbnb mornings, vacations, and coffee before heading out.
-- **Standing rule from this:** outdoors imagery is allowed only where it depicts a real, named family memory. The site overall reads family + coffee + memories, never outdoors/hiking/camping coffee.
+- **Standing rule from this:** outdoors imagery is allowed only where it depicts a real, named family memory. The site overall reads family + coffee + memories, never outdoors/hiking/camping coffee. **Exception (2026-09-29):** Adam's own master label uses a moon + mountains + owl night scene; that's his approved label art.
 - **Header logo set** via theme setting `logo` = `shopify://shop_images/ofltc-logo.png`, with `logo_height` 36→56 and mobile 28→44. The PNG was given a supersampled circular alpha mask first, so the square white background doesn't sit as a white block on the cream page.
 - **Duplicate signup, fake social links, and stock announcement bar** all cleaned up — see prior detail; announcement bar now reads "Who's grabbing the coffee?"
 - **Purple given real presence** beyond borders: memory-column headings in `#7B5E82` on cream, and the COMING SOON eyebrow in a lightened `#CDB4D4` so it reads against the navy band.
@@ -207,7 +221,7 @@ Shopify is the ecommerce engine; TCR has a Shopify fulfillment connection — cu
 **When the invite arrives, do in order:**
 1. Install only the official TCR app
 2. Use the Self-Serve / free path only
-3. Confirm Before the Chaos maps to SKU `COWB`
+3. Confirm Before the Chaos maps to the right SKU (now `FRENCH-DRIP-12OZ-KRAFT`, per Adam 2026-09-29)
 4. Verify Shopify → TCR fulfillment
 5. Verify tracking returns to Shopify
 6. Prepare a password-protected test order
@@ -222,6 +236,8 @@ Shopify is the ecommerce engine; TCR has a Shopify fulfillment connection — cu
 
 **Trademark / label clearance:**
 - **"Nocturnal Chaos Coffee" (new umbrella brand, 2026-09-22): name check NOT done yet.** It gates final label printing.
+  - **PRELIMINARY SCREENING DONE 2026-09-24 (~04:40 PT). Rating: POSSIBLE CONFLICT (not high-risk). NOT a clearance.** Method: the USPTO trademark search backend (`tmsearch.uspto.gov/prod-v1-0-0/tmsearch`, the same data as the public search UI), live + dead records, plus web/business search. Findings: **no NOCTURNAL + CHAOS mark exists in any class.** "CHAOS COFFEE" SN 98111063 (Caprine Creations, IC 030) = **ABANDONED**; "CHAOS COFFEE" SN 88358489 (Copper Moon, IC 030) = **ABANDONED**. **Main concern: ORDER & CHAOS COFFEE., Reg 5152795, LIVE (Sec. 8 & 15 accepted), IC 043 café services, Weekender LLC (MD)**, which shares "CHAOS COFFEE"; coffee goods and café services are often treated as related. Lower concerns: CHAOS, Reg 8451730, IC 030 chocolate (L528 LLC); NOCTURNAL JOYRIDE, Reg 6914100, IC 030 tea (Irreverent Foods); N NOCTURNAL CAFE, SN 98636166, IC 021 coffee grinders, notice of allowance (Dux Maximus LLC, CA); NOCTURNAL, Reg 6623271, IC 005/032 drink mixes (Cirkul). Unregistered market users: Chaos Coffee (chaoscoffee.us), Chaos Coffee Co. (NC roaster), the Nocturnal coffee shop (Monroe, MI), @coffee.nocturnal (IG), "Nocturnal" as a blend name at several roasters (Path, Midnight Coffee Roasting, Southern Roasting, Agro). Both words are crowded in coffee, so each is weaker alone; the combination itself is unique on the register.
+- **"Before the Chaos": PRELIMINARY SCREENING 2026-09-24. Rating: NO OBVIOUS CONFLICT on the USPTO register** (the only BEFORE+CHAOS mark is a cancelled IC 035 consulting mark). Market caution: "Coffee Before Chaos" is a common merch phrase (Etsy, prints, decals), and **"Coffee Then Chaos" (Story of This Life) sells coffee** (incl. a "Calm Before the Storm Blend"): the closest real-world neighbour. A common phrase may also be harder to register. Not a clearance.
 - (Retired name) "O For the Love of Coffee" had no obvious exact federal match in searches done so far, but older similar "For the Love of Coffee" marks exist (including abandoned filings and an older registered mark containing that phrase). **Not formally trademark-cleared — do proper clearance before major packaging/ad spend.** Consider filing both a word mark and a logo mark once cleared.
 - **"Before the Chaos" also needs proper trademark/name clearance before final label printing.** Draft use (site copy, unpublished product) is fine. **Final printed label stays on HOLD until cleared.**
 
@@ -240,15 +256,17 @@ Grok/Chief is already managing the project skeleton — no extra bots needed rig
 ## Launch Checklist
 
 - [x] TCR official Shopify app installed (2026-09-22)
-- [x] Before the Chaos mapped to TCR SKU `COWB-DRIP-12OZ-KRAFT` (2026-09-22)
+- [x] Before the Chaos mapped to TCR SKU `COWB-DRIP-12OZ-KRAFT` (2026-09-22) → now `FRENCH-DRIP-12OZ-KRAFT` (French Roast, per Adam 2026-09-29)
 - [ ] Convert everything from O For the Love of Coffee to **Nocturnal Chaos Coffee** (Shopify, Base44, vault, brand files); keep it all Private/DRAFT
-- [ ] Draft the Before the Chaos label (contained dark panel) → TCR email review → name checks → only then upload and print
+- [x] Draft the Before the Chaos label (contained dark panel) → emailed to TCR for review 2026-09-24 (Adam; superseded)
+- [x] New master label submitted in the TCR app, Sep 28 (Adam)
+- [ ] TCR label approval (up to 3 business days) → card on file in the TCR app → test order → launch (each on Adam's go)
 - [ ] Verify Shopify → TCR fulfillment and tracking return
 - [ ] Prepare a password-protected test order
 - [ ] Add approved product photos to Before the Chaos
 - [ ] Finish/test checkout and shipping end-to-end
 - [ ] Review and resolve TCR policy-wording conflicts (shipping timing, theft, returns, label address) before publishing store policies
-- [ ] Taste French Roast when it arrives; decide only after tasting whether it becomes Product #2 ("Last Cup" — name not yet cleared)
+- [x] Taste French Roast → it won the blind tasting and became Before the Chaos (2026-09-29)
 - [ ] Business ownership decision (sole prop / LLC / partnership — Adam's call, no filing without approval)
 - [ ] EIN — online path exhausted; Form SS-4 by fax is the next step, TABLED 2026-09-17 (see Business Setup below)
 - [ ] DBA / FBN (not to be filed without Adam's approval)
@@ -300,7 +318,10 @@ Structure confirmed for the EIN application: **sole proprietorship** (Adam perso
 - Line 18, applied for EIN before: No
 - Signature section (name/title, phone, signature, date): Adam, by hand
 
-## Status (as of 2026-09-22)
+## Status (as of 2026-09-29) — current status lives in [[Overview & Status]]
+- **Pre-launch.** Before the Chaos = TCR French Roast `FRENCH-DRIP-12OZ-KRAFT`, $24.99, DRAFT; free shipping (TCR price includes it); new master label submitted in the TCR app on 9/28 and awaiting review; store private/Opening Soon; social accounts all paused, nothing posted; palette black/deep purple/silver.
+
+## Status (as of 2026-09-22) — history
 
 - Brand concept, tagline, logo direction: **locked**
 - Supplier: **locked — TCR**; Apffels is a possible future-only alternative

@@ -58,3 +58,12 @@ Nine school days on record, no absences:
 
 ## Open — connect to Think Wave
 Realistic path is a manual/periodic one: export CSV from Think Wave, then either import it by hand into Base44's entity data, or Jarvis builds an import feature in the app that ingests that CSV format. Adam has login (`Elijah.Landrum`) but Jarvis has no browser/login tool to act on Think Wave directly — Adam would need to pull the export himself, or grant a way to automate it. Alternative: contact Think Wave directly to ask if they have an API for partners/schools that isn't publicly documented. Get direction from Adam before building anything.
+
+## Idea: a Jarvis for Elijah (raised 2026-09-25, scoping only, nothing built)
+Adam: "I want to build a Jarvis for my son. I need a separate Claude account and what else."
+Jarvis's scoping answer (pending Adam's direction):
+- **Account:** Claude's consumer plans are for adults (18+), so the account has to be **owned by Adam** and used under his supervision. The alternative is a scoped tutor built on the API inside this academy app.
+- **Isolation is the big one:** his own Windows user or device, his own working folder + CLAUDE.md, and his **own vault/repo**. Adam's vault holds trading, accounts and business data, so it must never be readable from Elijah's setup.
+- **Scoped connectors only** (school Drive/Docs, calendar); nothing of Adam's (Gmail, Shopify, Base44 admin, trading, TradingView).
+- **A tutor persona with an academic-integrity rule** (coach, don't do the work), plus parent visibility (daily notes/transcripts Adam can read).
+

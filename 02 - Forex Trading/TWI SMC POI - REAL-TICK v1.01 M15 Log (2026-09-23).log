@@ -1,0 +1,318 @@
+NO	0	22:57:04.342	Core 1	XAUUSD,M15: testing of Experts\Advisors\TWISMCPOI.ex5 from 2026.09.11 00:00 to 2026.09.23 00:00 started with inputs:
+NL	0	22:57:04.342	Core 1	  MagicNumber=20260923
+DE	0	22:57:04.342	Core 1	  TradeComment=TWI SMC POI
+IJ	0	22:57:04.342	Core 1	  SwingBars=3
+GQ	0	22:57:04.342	Core 1	  MaxOBSearchBars=20
+MI	0	22:57:04.342	Core 1	  MaxSetupBars=240
+KG	0	22:57:04.342	Core 1	  SLBufferPoints=30
+OO	0	22:57:04.342	Core 1	  TPBufferPoints=0
+KD	0	22:57:04.342	Core 1	  MinRR=1.0
+MJ	0	22:57:04.342	Core 1	  RiskPercent=0.5
+QS	0	22:57:04.342	Core 1	  RiskOvershootTolerancePercent=10.0
+LH	0	22:57:04.342	Core 1	  MaxSpreadPoints=55
+CP	0	22:57:04.342	Core 1	  FridayCutoffHour=23
+LF	0	22:57:04.342	Core 1	  DebugMode=true
+MK	0	22:57:04.342	Core 1	2026.09.11 00:00:00   TWI SMC POI v1.01 on XAUUSD PERIOD_M15 | Swing 3 | Risk 0.50% | MinRR 1.00 | MaxSpread 55
+CE	0	22:57:04.342	Core 1	XAUUSD : real ticks begin from 2026.09.11 00:00:00
+MD	0	22:57:04.342	Core 1	2026.09.11 03:45:00   [SMC POI] BULL BOS @ 2026.09.11 03:30 (broke swing 4324.35 from 2026.09.11 01:00). POI 4311.16-4316.06 (candle 2026.09.11 02:45). Target starts 4327.55
+IO	0	22:57:04.342	Core 1	2026.09.11 06:00:00   [SMC POI] LONG setup dropped: POI touched before any liquidity sweep
+EM	0	22:57:04.342	Core 1	2026.09.11 06:30:00   [SMC POI] BEAR BOS @ 2026.09.11 06:15 (broke swing 4311.16 from 2026.09.11 02:45). POI 4332.04-4340.41 (candle 2026.09.11 04:00). Target starts 4304.01
+CI	0	22:57:04.342	Core 1	2026.09.11 07:45:00   [SMC POI] SHORT setup dropped: POI touched before any liquidity sweep
+PE	0	22:57:04.342	Core 1	2026.09.11 08:45:00   [SMC POI] BULL BOS @ 2026.09.11 08:30 (broke swing 4340.41 from 2026.09.11 04:00). POI 4300.56-4308.18 (candle 2026.09.11 06:45). Target starts 4342.93
+CS	0	22:57:04.342	Core 1	2026.09.11 14:00:00   [SMC POI] SWEEP of post-BOS low 4340.78 @ 2026.09.11 13:45. Target frozen at 4361.09
+LL	0	22:57:04.342	Core 1	2026.09.11 14:00:00   RISK CHECK:
+EK	0	22:57:04.342	Core 1	2026.09.11 14:00:00     Equity=$10000.00  TargetRisk=0.50% ($50.00)
+DM	0	22:57:04.342	Core 1	2026.09.11 14:00:00     Entry=4308.18  SL=4300.26  1-lot SL loss=$792.00  Lots=0.06
+GS	0	22:57:04.342	Core 1	2026.09.11 14:00:00     ProjectedLoss=$47.52  ActualRisk=0.4752%  (ceiling 0.5500%)
+RS	0	22:57:04.342	Core 1	2026.09.11 14:00:00   buy limit 0.06 XAUUSD at 4308.18 sl: 4300.26 tp: 4361.09 (4337.64 / 4338.16)
+IO	0	22:57:04.342	Core 1	2026.09.11 14:00:00   CTrade::OrderSend: buy limit 0.06 XAUUSD at 4308.18 sl: 4300.26 tp: 4361.09 [done]
+RM	0	22:57:04.342	Core 1	2026.09.11 14:00:00   [SMC POI] BUY LIMIT 0.06 lots @ 4308.18  SL 4300.26  TP 4361.09  RR 6.68
+IP	0	22:57:04.342	Core 1	2026.09.11 15:30:11   order [#2 buy limit 0.06 XAUUSD at 4308.18] triggered
+IH	0	22:57:04.342	Core 1	2026.09.11 15:30:11   deal #2 buy 0.06 XAUUSD at 4307.95 done (based on order #2)
+II	0	22:57:04.342	Core 1	2026.09.11 15:30:11   deal performed [#2 buy 0.06 XAUUSD at 4307.95]
+OR	0	22:57:04.342	Core 1	2026.09.11 15:30:11   order performed buy 0.06 at 4307.95 [#2 buy limit 0.06 XAUUSD at 4308.18]
+PS	0	22:57:04.342	Core 1	2026.09.11 15:30:11   R BASE:
+PG	0	22:57:04.342	Core 1	2026.09.11 15:30:11     PositionID=2  Direction=BUY
+PL	0	22:57:04.342	Core 1	2026.09.11 15:30:11     Fill=4307.95  OriginalSL=4300.26  TP=4361.09  Lots=0.06
+EN	0	22:57:04.342	Core 1	2026.09.11 15:30:11     InitialRiskMoney=$46.14  (riskValid=true)
+NF	0	22:57:04.342	Core 1	2026.09.11 15:30:14   stop loss triggered #2 buy 0.06 XAUUSD 4307.95 sl: 4300.26 tp: 4361.09 [#3 sell 0.06 XAUUSD at 4300.26]
+ER	0	22:57:04.342	Core 1	2026.09.11 15:30:14   deal #3 sell 0.06 XAUUSD at 4299.54 done (based on order #3)
+PK	0	22:57:04.342	Core 1	2026.09.11 15:30:14   deal performed [#3 sell 0.06 XAUUSD at 4299.54]
+LJ	0	22:57:04.342	Core 1	2026.09.11 15:30:14   order performed sell 0.06 at 4299.54 [#3 sell 0.06 XAUUSD at 4300.26]
+IE	0	22:57:04.342	Core 1	2026.09.11 15:30:14   R RESULT:
+PP	0	22:57:04.342	Core 1	2026.09.11 15:30:14     PositionID=2  InitialRiskMoney=$46.14
+HE	0	22:57:04.342	Core 1	2026.09.11 15:30:14     Gross=$-50.46  Commission=$0.00  Swap=$0.00  Fee=$0.00  NetPnL=$-50.46
+DI	0	22:57:04.342	Core 1	2026.09.11 15:30:14     FinalR=-1.09
+ON	0	22:57:04.342	Core 1	2026.09.11 15:45:00   [SMC POI] BULL BOS @ 2026.09.11 15:30 (broke swing 4349.87 from 2026.09.11 13:15). POI 4289.92-4333.25 (candle 2026.09.11 15:00). Target starts 4362.63
+RF	0	22:57:04.342	Core 1	2026.09.11 19:30:00   [SMC POI] SWEEP of post-BOS low 4359.12 @ 2026.09.11 19:15. Target frozen at 4402.45
+JK	0	22:57:04.342	Core 1	2026.09.11 19:30:00   RISK CHECK:
+NM	0	22:57:04.342	Core 1	2026.09.11 19:30:00     Equity=$9949.54  TargetRisk=0.50% ($49.75)
+ES	0	22:57:04.342	Core 1	2026.09.11 19:30:00     Entry=4333.25  SL=4289.62  1-lot SL loss=$4363.00  Lots=0.01
+EF	0	22:57:04.342	Core 1	2026.09.11 19:30:00     ProjectedLoss=$43.63  ActualRisk=0.4385%  (ceiling 0.5500%)
+PH	0	22:57:04.342	Core 1	2026.09.11 19:30:00   buy limit 0.01 XAUUSD at 4333.25 sl: 4289.62 tp: 4402.45 (4354.79 / 4355.31)
+FD	0	22:57:04.342	Core 1	2026.09.11 19:30:00   CTrade::OrderSend: buy limit 0.01 XAUUSD at 4333.25 sl: 4289.62 tp: 4402.45 [done]
+RF	0	22:57:04.342	Core 1	2026.09.11 19:30:00   [SMC POI] BUY LIMIT 0.01 lots @ 4333.25  SL 4289.62  TP 4402.45  RR 1.59
+LD	0	22:57:04.342	Core 1	2026.09.11 23:00:00   order canceled [#4 buy limit 0.01 XAUUSD at 4333.25]
+CS	0	22:57:04.342	Core 1	2026.09.11 23:00:00   CTrade::OrderSend: cancel #4 [done]
+NR	0	22:57:04.342	Core 1	2026.09.11 23:00:00   [SMC POI] LONG setup dropped: Friday cutoff - nothing rests over the weekend
+GL	0	22:57:04.342	Core 1	2026.09.14 01:15:00   [SMC POI] BEAR BOS @ 2026.09.14 01:00 (broke swing 4342.57 from 2026.09.11 22:45). POI 4346.10-4351.32 (candle 2026.09.11 22:45). Target starts 4322.24
+KG	0	22:57:04.342	Core 1	2026.09.14 03:15:00   [SMC POI] SWEEP of post-BOS high 4342.32 @ 2026.09.14 03:00. Target frozen at 4322.24
+GE	0	22:57:04.342	Core 1	2026.09.14 03:15:00   RISK CHECK:
+KR	0	22:57:04.342	Core 1	2026.09.14 03:15:00     Equity=$9949.54  TargetRisk=0.50% ($49.75)
+PF	0	22:57:04.342	Core 1	2026.09.14 03:15:00     Entry=4346.10  SL=4351.62  1-lot SL loss=$552.00  Lots=0.09
+FD	0	22:57:04.342	Core 1	2026.09.14 03:15:00     ProjectedLoss=$49.68  ActualRisk=0.4993%  (ceiling 0.5500%)
+MF	0	22:57:04.342	Core 1	2026.09.14 03:15:00   sell limit 0.09 XAUUSD at 4346.10 sl: 4351.62 tp: 4322.24 (4342.68 / 4343.20)
+QI	0	22:57:04.342	Core 1	2026.09.14 03:15:00   CTrade::OrderSend: sell limit 0.09 XAUUSD at 4346.10 sl: 4351.62 tp: 4322.24 [done]
+GJ	0	22:57:04.342	Core 1	2026.09.14 03:15:00   [SMC POI] SELL LIMIT 0.09 lots @ 4346.10  SL 4351.62  TP 4322.24  RR 4.32
+GF	0	22:57:04.342	Core 1	2026.09.14 04:40:19   order [#5 sell limit 0.09 XAUUSD at 4346.10] triggered
+EM	0	22:57:04.342	Core 1	2026.09.14 04:40:19   deal #4 sell 0.09 XAUUSD at 4346.14 done (based on order #5)
+JP	0	22:57:04.342	Core 1	2026.09.14 04:40:19   deal performed [#4 sell 0.09 XAUUSD at 4346.14]
+RL	0	22:57:04.342	Core 1	2026.09.14 04:40:19   order performed sell 0.09 at 4346.14 [#5 sell limit 0.09 XAUUSD at 4346.10]
+NI	0	22:57:04.342	Core 1	2026.09.14 04:40:19   R BASE:
+GP	0	22:57:04.342	Core 1	2026.09.14 04:40:19     PositionID=5  Direction=SELL
+ER	0	22:57:04.342	Core 1	2026.09.14 04:40:19     Fill=4346.14  OriginalSL=4351.62  TP=4322.24  Lots=0.09
+LH	0	22:57:04.342	Core 1	2026.09.14 04:40:19     InitialRiskMoney=$49.32  (riskValid=true)
+JI	0	22:57:04.342	Core 1	2026.09.14 04:57:23   stop loss triggered #5 sell 0.09 XAUUSD 4346.14 sl: 4351.62 tp: 4322.24 [#6 buy 0.09 XAUUSD at 4351.62]
+OH	0	22:57:04.342	Core 1	2026.09.14 04:57:23   deal #5 buy 0.09 XAUUSD at 4351.62 done (based on order #6)
+KJ	0	22:57:04.342	Core 1	2026.09.14 04:57:23   deal performed [#5 buy 0.09 XAUUSD at 4351.62]
+ML	0	22:57:04.342	Core 1	2026.09.14 04:57:23   order performed buy 0.09 at 4351.62 [#6 buy 0.09 XAUUSD at 4351.62]
+CS	0	22:57:04.342	Core 1	2026.09.14 04:57:23   R RESULT:
+RJ	0	22:57:04.342	Core 1	2026.09.14 04:57:23     PositionID=5  InitialRiskMoney=$49.32
+NO	0	22:57:04.342	Core 1	2026.09.14 04:57:23     Gross=$-49.32  Commission=$0.00  Swap=$0.00  Fee=$0.00  NetPnL=$-49.32
+MO	0	22:57:04.342	Core 1	2026.09.14 04:57:23     FinalR=-1.00
+KH	0	22:57:04.342	Core 1	2026.09.14 05:00:00   [SMC POI] BULL BOS @ 2026.09.14 04:45 (broke swing 4347.42 from 2026.09.14 03:00). POI 4325.89-4338.46 (candle 2026.09.14 04:00). Target starts 4355.19
+JS	0	22:57:04.342	Core 1	2026.09.14 06:00:00   [SMC POI] LONG setup dropped: POI touched before any liquidity sweep
+OP	0	22:57:04.342	Core 1	2026.09.14 07:45:00   [SMC POI] BEAR BOS @ 2026.09.14 07:30 (broke swing 4327.12 from 2026.09.14 06:30). POI 4333.36-4336.52 (candle 2026.09.14 06:15). Target starts 4322.88
+IF	0	22:57:04.342	Core 1	2026.09.14 08:45:00   [SMC POI] SHORT setup dropped: POI touched before any liquidity sweep
+PI	0	22:57:04.342	Core 1	2026.09.14 10:00:00   [SMC POI] BEAR BOS @ 2026.09.14 09:45 (broke swing 4323.47 from 2026.09.14 08:45). POI 4330.91-4338.73 (candle 2026.09.14 08:45). Target starts 4320.40
+DP	0	22:57:04.342	Core 1	2026.09.14 15:30:00   [SMC POI] SWEEP of post-BOS high 4296.90 @ 2026.09.14 15:15. Target frozen at 4278.02
+GP	0	22:57:04.342	Core 1	2026.09.14 15:30:00   RISK CHECK:
+FG	0	22:57:04.342	Core 1	2026.09.14 15:30:00     Equity=$9900.22  TargetRisk=0.50% ($49.50)
+MI	0	22:57:04.342	Core 1	2026.09.14 15:30:00     Entry=4330.91  SL=4339.03  1-lot SL loss=$812.00  Lots=0.06
+CO	0	22:57:04.342	Core 1	2026.09.14 15:30:00     ProjectedLoss=$48.72  ActualRisk=0.4921%  (ceiling 0.5500%)
+LQ	0	22:57:04.342	Core 1	2026.09.14 15:30:00   sell limit 0.06 XAUUSD at 4330.91 sl: 4339.03 tp: 4278.02 (4285.85 / 4286.37)
+ML	0	22:57:04.342	Core 1	2026.09.14 15:30:00   CTrade::OrderSend: sell limit 0.06 XAUUSD at 4330.91 sl: 4339.03 tp: 4278.02 [done]
+JM	0	22:57:04.342	Core 1	2026.09.14 15:30:00   [SMC POI] SELL LIMIT 0.06 lots @ 4330.91  SL 4339.03  TP 4278.02  RR 6.51
+EL	0	22:57:04.342	Core 1	2026.09.14 15:45:00   order canceled [#7 sell limit 0.06 XAUUSD at 4330.91]
+QM	0	22:57:04.342	Core 1	2026.09.14 15:45:00   CTrade::OrderSend: cancel #7 [done]
+RD	0	22:57:04.342	Core 1	2026.09.14 15:45:00   [SMC POI] SHORT setup dropped: target liquidity taken before fill
+EG	0	22:57:04.342	Core 1	2026.09.14 16:00:00   [SMC POI] BEAR BOS @ 2026.09.14 15:45 (broke swing 4278.02 from 2026.09.14 12:45). POI 4286.90-4297.84 (candle 2026.09.14 15:00). Target starts 4265.70
+HS	0	22:57:04.342	Core 1	2026.09.14 18:45:00   [SMC POI] SHORT setup dropped: POI touched before any liquidity sweep
+GL	0	22:57:04.342	Core 1	2026.09.14 19:30:00   [SMC POI] BULL BOS @ 2026.09.14 19:15 (broke swing 4297.84 from 2026.09.14 15:15). POI 4253.48-4270.82 (candle 2026.09.14 16:00). Target starts 4305.44
+HH	0	22:57:04.342	Core 1	2026.09.15 10:45:00   [SMC POI] SWEEP of post-BOS low 4285.93 @ 2026.09.15 10:30. Target frozen at 4317.75
+EE	0	22:57:04.342	Core 1	2026.09.15 10:45:00   RISK CHECK:
+HR	0	22:57:04.342	Core 1	2026.09.15 10:45:00     Equity=$9900.22  TargetRisk=0.50% ($49.50)
+JE	0	22:57:04.342	Core 1	2026.09.15 10:45:00     Entry=4270.82  SL=4253.18  1-lot SL loss=$1764.00  Lots=0.02
+JD	0	22:57:04.342	Core 1	2026.09.15 10:45:00     ProjectedLoss=$35.28  ActualRisk=0.3564%  (ceiling 0.5500%)
+FI	0	22:57:04.342	Core 1	2026.09.15 10:45:00   buy limit 0.02 XAUUSD at 4270.82 sl: 4253.18 tp: 4317.75 (4283.73 / 4284.25)
+KF	0	22:57:04.342	Core 1	2026.09.15 10:45:00   CTrade::OrderSend: buy limit 0.02 XAUUSD at 4270.82 sl: 4253.18 tp: 4317.75 [done]
+JG	0	22:57:04.342	Core 1	2026.09.15 10:45:00   [SMC POI] BUY LIMIT 0.02 lots @ 4270.82  SL 4253.18  TP 4317.75  RR 2.66
+II	0	22:57:04.342	Core 1	2026.09.15 11:03:05   order [#8 buy limit 0.02 XAUUSD at 4270.82] triggered
+NR	0	22:57:04.342	Core 1	2026.09.15 11:03:05   deal #6 buy 0.02 XAUUSD at 4270.67 done (based on order #8)
+DP	0	22:57:04.342	Core 1	2026.09.15 11:03:05   deal performed [#6 buy 0.02 XAUUSD at 4270.67]
+KK	0	22:57:04.342	Core 1	2026.09.15 11:03:05   order performed buy 0.02 at 4270.67 [#8 buy limit 0.02 XAUUSD at 4270.82]
+EH	0	22:57:04.342	Core 1	2026.09.15 11:03:05   R BASE:
+KN	0	22:57:04.342	Core 1	2026.09.15 11:03:05     PositionID=8  Direction=BUY
+ME	0	22:57:04.342	Core 1	2026.09.15 11:03:05     Fill=4270.67  OriginalSL=4253.18  TP=4317.75  Lots=0.02
+OI	0	22:57:04.342	Core 1	2026.09.15 11:03:05     InitialRiskMoney=$34.98  (riskValid=true)
+NI	0	22:57:04.342	Core 1	2026.09.16 05:56:03   take profit triggered #8 buy 0.02 XAUUSD 4270.67 sl: 4253.18 tp: 4317.75 [#9 sell 0.02 XAUUSD at 4317.75]
+GH	0	22:57:04.342	Core 1	2026.09.16 05:56:03   deal #7 sell 0.02 XAUUSD at 4317.84 done (based on order #9)
+PE	0	22:57:04.342	Core 1	2026.09.16 05:56:03   deal performed [#7 sell 0.02 XAUUSD at 4317.84]
+FL	0	22:57:04.342	Core 1	2026.09.16 05:56:03   order performed sell 0.02 at 4317.84 [#9 sell 0.02 XAUUSD at 4317.75]
+OL	0	22:57:04.342	Core 1	2026.09.16 05:56:03   R RESULT:
+OJ	0	22:57:04.342	Core 1	2026.09.16 05:56:03     PositionID=8  InitialRiskMoney=$34.98
+DM	0	22:57:04.342	Core 1	2026.09.16 05:56:03     Gross=$94.34  Commission=$0.00  Swap=$-1.61  Fee=$0.00  NetPnL=$92.73
+PM	0	22:57:04.342	Core 1	2026.09.16 05:56:03     FinalR=2.65
+NI	0	22:57:04.342	Core 1	2026.09.16 10:15:00   [SMC POI] BULL BOS @ 2026.09.16 10:00 (broke swing 4333.65 from 2026.09.16 08:45). POI 4320.80-4326.46 (candle 2026.09.16 09:00). Target starts 4335.74
+RP	0	22:57:04.342	Core 1	2026.09.16 11:15:00   [SMC POI] LONG setup dropped: POI touched before any liquidity sweep
+RQ	0	22:57:04.342	Core 1	2026.09.16 13:15:00   [SMC POI] BULL BOS @ 2026.09.16 13:00 (broke swing 4339.04 from 2026.09.16 10:30). POI 4322.94-4329.35 (candle 2026.09.16 11:00). Target starts 4348.91
+NG	0	22:57:04.342	Core 1	2026.09.16 17:15:00   [SMC POI] SWEEP of post-BOS low 4334.89 @ 2026.09.16 17:00. Target frozen at 4360.48
+LH	0	22:57:04.342	Core 1	2026.09.16 17:15:00   RISK CHECK:
+FL	0	22:57:04.342	Core 1	2026.09.16 17:15:00     Equity=$9992.95  TargetRisk=0.50% ($49.96)
+GQ	0	22:57:04.342	Core 1	2026.09.16 17:15:00     Entry=4329.35  SL=4322.64  1-lot SL loss=$671.00  Lots=0.07
+LG	0	22:57:04.342	Core 1	2026.09.16 17:15:00     ProjectedLoss=$46.97  ActualRisk=0.4700%  (ceiling 0.5500%)
+RG	0	22:57:04.342	Core 1	2026.09.16 17:15:00   buy limit 0.07 XAUUSD at 4329.35 sl: 4322.64 tp: 4360.48 (4340.04 / 4340.56)
+JK	0	22:57:04.342	Core 1	2026.09.16 17:15:00   CTrade::OrderSend: buy limit 0.07 XAUUSD at 4329.35 sl: 4322.64 tp: 4360.48 [done]
+OI	0	22:57:04.342	Core 1	2026.09.16 17:15:00   [SMC POI] BUY LIMIT 0.07 lots @ 4329.35  SL 4322.64  TP 4360.48  RR 4.64
+CG	0	22:57:04.342	Core 1	2026.09.16 19:00:00   order canceled [#10 buy limit 0.07 XAUUSD at 4329.35]
+NG	0	22:57:04.342	Core 1	2026.09.16 19:00:00   CTrade::OrderSend: cancel #10 [done]
+EQ	0	22:57:04.342	Core 1	2026.09.16 19:00:00   [SMC POI] LONG setup dropped: target liquidity taken before fill
+OL	0	22:57:04.342	Core 1	2026.09.16 21:15:00   [SMC POI] BEAR BOS @ 2026.09.16 21:00 (broke swing 4341.37 from 2026.09.16 20:00). POI 4343.99-4367.63 (candle 2026.09.16 20:45). Target starts 4307.46
+EG	0	22:57:04.342	Core 1	2026.09.17 03:15:00   [SMC POI] SWEEP of post-BOS high 4276.16 @ 2026.09.17 03:00. Target frozen at 4234.66
+PE	0	22:57:04.342	Core 1	2026.09.17 03:15:00   RISK CHECK:
+JS	0	22:57:04.342	Core 1	2026.09.17 03:15:00     Equity=$9992.95  TargetRisk=0.50% ($49.96)
+ME	0	22:57:04.342	Core 1	2026.09.17 03:15:00     Entry=4343.99  SL=4367.93  1-lot SL loss=$2394.00  Lots=0.02
+KD	0	22:57:04.342	Core 1	2026.09.17 03:15:00     ProjectedLoss=$47.88  ActualRisk=0.4791%  (ceiling 0.5500%)
+LE	0	22:57:04.342	Core 1	2026.09.17 03:15:00   sell limit 0.02 XAUUSD at 4343.99 sl: 4367.93 tp: 4234.66 (4284.89 / 4285.41)
+PI	0	22:57:04.342	Core 1	2026.09.17 03:15:00   CTrade::OrderSend: sell limit 0.02 XAUUSD at 4343.99 sl: 4367.93 tp: 4234.66 [done]
+GJ	0	22:57:04.342	Core 1	2026.09.17 03:15:00   [SMC POI] SELL LIMIT 0.02 lots @ 4343.99  SL 4367.93  TP 4234.66  RR 4.57
+KE	0	22:57:04.342	Core 1	2026.09.17 14:57:24   order [#11 sell limit 0.02 XAUUSD at 4343.99] triggered
+JN	0	22:57:04.342	Core 1	2026.09.17 14:57:24   deal #8 sell 0.02 XAUUSD at 4344.04 done (based on order #11)
+LP	0	22:57:04.342	Core 1	2026.09.17 14:57:24   deal performed [#8 sell 0.02 XAUUSD at 4344.04]
+JO	0	22:57:04.342	Core 1	2026.09.17 14:57:24   order performed sell 0.02 at 4344.04 [#11 sell limit 0.02 XAUUSD at 4343.99]
+JI	0	22:57:04.342	Core 1	2026.09.17 14:57:24   R BASE:
+PS	0	22:57:04.342	Core 1	2026.09.17 14:57:24     PositionID=11  Direction=SELL
+RR	0	22:57:04.342	Core 1	2026.09.17 14:57:24     Fill=4344.04  OriginalSL=4367.93  TP=4234.66  Lots=0.02
+RK	0	22:57:04.342	Core 1	2026.09.17 14:57:24     InitialRiskMoney=$47.78  (riskValid=true)
+PI	0	22:57:04.342	Core 1	2026.09.17 15:21:24   stop loss triggered #11 sell 0.02 XAUUSD 4344.04 sl: 4367.93 tp: 4234.66 [#12 buy 0.02 XAUUSD at 4367.93]
+NK	0	22:57:04.342	Core 1	2026.09.17 15:21:24   deal #9 buy 0.02 XAUUSD at 4368.06 done (based on order #12)
+KI	0	22:57:04.342	Core 1	2026.09.17 15:21:24   deal performed [#9 buy 0.02 XAUUSD at 4368.06]
+JL	0	22:57:04.342	Core 1	2026.09.17 15:21:24   order performed buy 0.02 at 4368.06 [#12 buy 0.02 XAUUSD at 4367.93]
+LS	0	22:57:04.342	Core 1	2026.09.17 15:21:24   R RESULT:
+NF	0	22:57:04.342	Core 1	2026.09.17 15:21:24     PositionID=11  InitialRiskMoney=$47.78
+ON	0	22:57:04.342	Core 1	2026.09.17 15:21:24     Gross=$-48.04  Commission=$0.00  Swap=$0.00  Fee=$0.00  NetPnL=$-48.04
+CL	0	22:57:04.342	Core 1	2026.09.17 15:21:24     FinalR=-1.01
+PK	0	22:57:04.342	Core 1	2026.09.17 18:00:00   [SMC POI] BEAR BOS @ 2026.09.17 17:45 (broke swing 4355.20 from 2026.09.17 16:45). POI 4366.75-4380.00 (candle 2026.09.17 17:00). Target starts 4352.11
+CO	0	22:57:04.342	Core 1	2026.09.17 18:45:00   [SMC POI] SHORT setup dropped: POI touched before any liquidity sweep
+LS	0	22:57:04.342	Core 1	2026.09.17 21:45:00   [SMC POI] BEAR BOS @ 2026.09.17 21:30 (broke swing 4355.70 from 2026.09.17 19:45). POI 4359.93-4365.78 (candle 2026.09.17 19:45). Target starts 4348.13
+JJ	0	22:57:04.342	Core 1	2026.09.18 03:15:00   [SMC POI] SWEEP of post-BOS high 4349.44 @ 2026.09.18 03:00. Target frozen at 4339.36
+OI	0	22:57:04.342	Core 1	2026.09.18 03:15:00   RISK CHECK:
+FN	0	22:57:04.342	Core 1	2026.09.18 03:15:00     Equity=$9944.91  TargetRisk=0.50% ($49.72)
+LR	0	22:57:04.342	Core 1	2026.09.18 03:15:00     Entry=4359.93  SL=4366.08  1-lot SL loss=$615.00  Lots=0.08
+IP	0	22:57:04.342	Core 1	2026.09.18 03:15:00     ProjectedLoss=$49.20  ActualRisk=0.4947%  (ceiling 0.5500%)
+KJ	0	22:57:04.342	Core 1	2026.09.18 03:15:00   sell limit 0.08 XAUUSD at 4359.93 sl: 4366.08 tp: 4339.36 (4354.11 / 4354.64)
+NF	0	22:57:04.342	Core 1	2026.09.18 03:15:00   CTrade::OrderSend: sell limit 0.08 XAUUSD at 4359.93 sl: 4366.08 tp: 4339.36 [done]
+CF	0	22:57:04.342	Core 1	2026.09.18 03:15:00   [SMC POI] SELL LIMIT 0.08 lots @ 4359.93  SL 4366.08  TP 4339.36  RR 3.34
+HI	0	22:57:04.342	Core 1	2026.09.18 03:33:01   order [#13 sell limit 0.08 XAUUSD at 4359.93] triggered
+EI	0	22:57:04.342	Core 1	2026.09.18 03:33:01   deal #10 sell 0.08 XAUUSD at 4360.02 done (based on order #13)
+KG	0	22:57:04.342	Core 1	2026.09.18 03:33:01   deal performed [#10 sell 0.08 XAUUSD at 4360.02]
+GS	0	22:57:04.342	Core 1	2026.09.18 03:33:01   order performed sell 0.08 at 4360.02 [#13 sell limit 0.08 XAUUSD at 4359.93]
+RR	0	22:57:04.342	Core 1	2026.09.18 03:33:01   R BASE:
+JF	0	22:57:04.342	Core 1	2026.09.18 03:33:01     PositionID=13  Direction=SELL
+JO	0	22:57:04.342	Core 1	2026.09.18 03:33:01     Fill=4360.02  OriginalSL=4366.08  TP=4339.36  Lots=0.08
+FO	0	22:57:04.342	Core 1	2026.09.18 03:33:01     InitialRiskMoney=$48.48  (riskValid=true)
+PF	0	22:57:04.342	Core 1	2026.09.18 04:06:58   stop loss triggered #13 sell 0.08 XAUUSD 4360.02 sl: 4366.08 tp: 4339.36 [#14 buy 0.08 XAUUSD at 4366.08]
+MM	0	22:57:04.342	Core 1	2026.09.18 04:06:58   deal #11 buy 0.08 XAUUSD at 4366.09 done (based on order #14)
+LG	0	22:57:04.342	Core 1	2026.09.18 04:06:58   deal performed [#11 buy 0.08 XAUUSD at 4366.09]
+EI	0	22:57:04.342	Core 1	2026.09.18 04:06:58   order performed buy 0.08 at 4366.09 [#14 buy 0.08 XAUUSD at 4366.08]
+KF	0	22:57:04.342	Core 1	2026.09.18 04:06:58   R RESULT:
+GS	0	22:57:04.342	Core 1	2026.09.18 04:06:58     PositionID=13  InitialRiskMoney=$48.48
+PE	0	22:57:04.342	Core 1	2026.09.18 04:06:58     Gross=$-48.56  Commission=$0.00  Swap=$0.00  Fee=$0.00  NetPnL=$-48.56
+CI	0	22:57:04.342	Core 1	2026.09.18 04:06:58     FinalR=-1.00
+MN	0	22:57:04.342	Core 1	2026.09.18 06:30:00   [SMC POI] BEAR BOS @ 2026.09.18 06:15 (broke swing 4343.88 from 2026.09.18 04:45). POI 4350.39-4356.54 (candle 2026.09.18 05:15). Target starts 4334.08
+FG	0	22:57:04.342	Core 1	2026.09.18 06:45:00   [SMC POI] SHORT setup dropped: closed through the POI before the sweep
+FF	0	22:57:04.342	Core 1	2026.09.18 12:45:00   [SMC POI] BEAR BOS @ 2026.09.18 12:30 (broke swing 4385.02 from 2026.09.18 11:30). POI 4392.18-4398.14 (candle 2026.09.18 12:00). Target starts 4376.30
+EQ	0	22:57:04.342	Core 1	2026.09.18 19:15:00   [SMC POI] SWEEP of post-BOS high 4361.70 @ 2026.09.18 19:00. Target frozen at 4342.65
+HR	0	22:57:04.342	Core 1	2026.09.18 19:15:00   RISK CHECK:
+FE	0	22:57:04.342	Core 1	2026.09.18 19:15:00     Equity=$9896.35  TargetRisk=0.50% ($49.48)
+QH	0	22:57:04.342	Core 1	2026.09.18 19:15:00     Entry=4392.18  SL=4398.44  1-lot SL loss=$626.00  Lots=0.07
+PM	0	22:57:04.342	Core 1	2026.09.18 19:15:00     ProjectedLoss=$43.82  ActualRisk=0.4428%  (ceiling 0.5500%)
+DO	0	22:57:04.342	Core 1	2026.09.18 19:15:00   sell limit 0.07 XAUUSD at 4392.18 sl: 4398.44 tp: 4342.65 (4361.65 / 4362.17)
+QS	0	22:57:04.342	Core 1	2026.09.18 19:15:00   CTrade::OrderSend: sell limit 0.07 XAUUSD at 4392.18 sl: 4398.44 tp: 4342.65 [done]
+QS	0	22:57:04.342	Core 1	2026.09.18 19:15:00   [SMC POI] SELL LIMIT 0.07 lots @ 4392.18  SL 4398.44  TP 4342.65  RR 7.91
+GO	0	22:57:04.342	Core 1	2026.09.18 20:34:50   order [#15 sell limit 0.07 XAUUSD at 4392.18] triggered
+FS	0	22:57:04.342	Core 1	2026.09.18 20:34:50   deal #12 sell 0.07 XAUUSD at 4392.18 done (based on order #15)
+FJ	0	22:57:04.342	Core 1	2026.09.18 20:34:50   deal performed [#12 sell 0.07 XAUUSD at 4392.18]
+OE	0	22:57:04.342	Core 1	2026.09.18 20:34:50   order performed sell 0.07 at 4392.18 [#15 sell limit 0.07 XAUUSD at 4392.18]
+RG	0	22:57:04.342	Core 1	2026.09.18 20:34:50   R BASE:
+DM	0	22:57:04.342	Core 1	2026.09.18 20:34:50     PositionID=15  Direction=SELL
+PH	0	22:57:04.342	Core 1	2026.09.18 20:34:50     Fill=4392.18  OriginalSL=4398.44  TP=4342.65  Lots=0.07
+QR	0	22:57:04.342	Core 1	2026.09.18 20:34:50     InitialRiskMoney=$43.82  (riskValid=true)
+ER	0	22:57:04.342	Core 1	2026.09.21 10:43:40   take profit triggered #15 sell 0.07 XAUUSD 4392.18 sl: 4398.44 tp: 4342.65 [#16 buy 0.07 XAUUSD at 4342.65]
+OR	0	22:57:04.342	Core 1	2026.09.21 10:43:40   deal #13 buy 0.07 XAUUSD at 4342.61 done (based on order #16)
+HL	0	22:57:04.342	Core 1	2026.09.21 10:43:40   deal performed [#13 buy 0.07 XAUUSD at 4342.61]
+OR	0	22:57:04.342	Core 1	2026.09.21 10:43:40   order performed buy 0.07 at 4342.61 [#16 buy 0.07 XAUUSD at 4342.65]
+HH	0	22:57:04.342	Core 1	2026.09.21 10:43:40   R RESULT:
+EL	0	22:57:04.342	Core 1	2026.09.21 10:43:40     PositionID=15  InitialRiskMoney=$43.82
+MP	0	22:57:04.342	Core 1	2026.09.21 10:43:40     Gross=$346.99  Commission=$0.00  Swap=$1.41  Fee=$0.00  NetPnL=$348.40
+MP	0	22:57:04.342	Core 1	2026.09.21 10:43:40     FinalR=7.95
+JE	0	22:57:04.342	Core 1	2026.09.21 11:45:00   [SMC POI] BULL BOS @ 2026.09.21 11:30 (broke swing 4356.05 from 2026.09.21 10:00). POI 4341.69-4350.62 (candle 2026.09.21 10:30). Target starts 4357.82
+ML	0	22:57:04.342	Core 1	2026.09.21 12:00:00   [SMC POI] LONG setup dropped: POI touched before any liquidity sweep
+EM	0	22:57:04.342	Core 1	2026.09.21 14:45:00   [SMC POI] BULL BOS @ 2026.09.21 14:30 (broke swing 4356.65 from 2026.09.21 13:15). POI 4341.66-4348.31 (candle 2026.09.21 13:45). Target starts 4367.42
+CK	0	22:57:04.342	Core 1	2026.09.21 16:45:00   [SMC POI] SWEEP of post-BOS low 4350.77 @ 2026.09.21 16:30. Target frozen at 4374.85
+JG	0	22:57:04.342	Core 1	2026.09.21 16:45:00   RISK CHECK:
+PS	0	22:57:04.342	Core 1	2026.09.21 16:45:00     Equity=$10244.75  TargetRisk=0.50% ($51.22)
+NE	0	22:57:04.342	Core 1	2026.09.21 16:45:00     Entry=4348.31  SL=4341.36  1-lot SL loss=$695.00  Lots=0.07
+NJ	0	22:57:04.342	Core 1	2026.09.21 16:45:00     ProjectedLoss=$48.65  ActualRisk=0.4749%  (ceiling 0.5500%)
+NK	0	22:57:04.342	Core 1	2026.09.21 16:45:00   buy limit 0.07 XAUUSD at 4348.31 sl: 4341.36 tp: 4374.85 (4352.97 / 4353.49)
+IG	0	22:57:04.342	Core 1	2026.09.21 16:45:00   CTrade::OrderSend: buy limit 0.07 XAUUSD at 4348.31 sl: 4341.36 tp: 4374.85 [done]
+EE	0	22:57:04.342	Core 1	2026.09.21 16:45:00   [SMC POI] BUY LIMIT 0.07 lots @ 4348.31  SL 4341.36  TP 4374.85  RR 3.82
+GL	0	22:57:04.342	Core 1	2026.09.21 16:55:01   order [#17 buy limit 0.07 XAUUSD at 4348.31] triggered
+IP	0	22:57:04.342	Core 1	2026.09.21 16:55:01   deal #14 buy 0.07 XAUUSD at 4348.30 done (based on order #17)
+IR	0	22:57:04.342	Core 1	2026.09.21 16:55:01   deal performed [#14 buy 0.07 XAUUSD at 4348.30]
+JI	0	22:57:04.342	Core 1	2026.09.21 16:55:01   order performed buy 0.07 at 4348.30 [#17 buy limit 0.07 XAUUSD at 4348.31]
+FK	0	22:57:04.342	Core 1	2026.09.21 16:55:01   R BASE:
+JL	0	22:57:04.342	Core 1	2026.09.21 16:55:01     PositionID=17  Direction=BUY
+GD	0	22:57:04.342	Core 1	2026.09.21 16:55:01     Fill=4348.30  OriginalSL=4341.36  TP=4374.85  Lots=0.07
+OF	0	22:57:04.342	Core 1	2026.09.21 16:55:01     InitialRiskMoney=$48.58  (riskValid=true)
+KO	0	22:57:04.342	Core 1	2026.09.21 17:02:24   stop loss triggered #17 buy 0.07 XAUUSD 4348.30 sl: 4341.36 tp: 4374.85 [#18 sell 0.07 XAUUSD at 4341.36]
+NI	0	22:57:04.342	Core 1	2026.09.21 17:02:24   deal #15 sell 0.07 XAUUSD at 4341.36 done (based on order #18)
+IG	0	22:57:04.342	Core 1	2026.09.21 17:02:24   deal performed [#15 sell 0.07 XAUUSD at 4341.36]
+GN	0	22:57:04.342	Core 1	2026.09.21 17:02:24   order performed sell 0.07 at 4341.36 [#18 sell 0.07 XAUUSD at 4341.36]
+JL	0	22:57:04.342	Core 1	2026.09.21 17:02:24   R RESULT:
+QH	0	22:57:04.342	Core 1	2026.09.21 17:02:24     PositionID=17  InitialRiskMoney=$48.58
+EL	0	22:57:04.342	Core 1	2026.09.21 17:02:24     Gross=$-48.58  Commission=$0.00  Swap=$0.00  Fee=$0.00  NetPnL=$-48.58
+RN	0	22:57:04.342	Core 1	2026.09.21 17:02:24     FinalR=-1.00
+KI	0	22:57:04.342	Core 1	2026.09.21 23:15:00   [SMC POI] BEAR BOS @ 2026.09.21 23:00 (broke swing 4342.12 from 2026.09.21 22:00). POI 4345.48-4353.75 (candle 2026.09.21 22:15). Target starts 4341.41
+FM	0	22:57:04.342	Core 1	2026.09.22 01:15:00   [SMC POI] SHORT setup dropped: POI touched before any liquidity sweep
+GQ	0	22:57:04.342	Core 1	2026.09.22 02:00:00   [SMC POI] BULL BOS @ 2026.09.22 01:45 (broke swing 4353.75 from 2026.09.21 22:30). POI 4339.01-4341.42 (candle 2026.09.21 23:15). Target starts 4364.94
+QG	0	22:57:04.342	Core 1	2026.09.22 05:00:00   [SMC POI] SWEEP of post-BOS low 4348.29 @ 2026.09.22 04:45. Target frozen at 4375.91
+LH	0	22:57:04.342	Core 1	2026.09.22 05:00:00   RISK CHECK:
+NO	0	22:57:04.342	Core 1	2026.09.22 05:00:00     Equity=$10196.17  TargetRisk=0.50% ($50.98)
+PQ	0	22:57:04.342	Core 1	2026.09.22 05:00:00     Entry=4341.42  SL=4338.71  1-lot SL loss=$271.00  Lots=0.18
+KG	0	22:57:04.342	Core 1	2026.09.22 05:00:00     ProjectedLoss=$48.78  ActualRisk=0.4784%  (ceiling 0.5500%)
+KG	0	22:57:04.342	Core 1	2026.09.22 05:00:00   buy limit 0.18 XAUUSD at 4341.42 sl: 4338.71 tp: 4375.91 (4348.32 / 4348.84)
+IK	0	22:57:04.342	Core 1	2026.09.22 05:00:00   CTrade::OrderSend: buy limit 0.18 XAUUSD at 4341.42 sl: 4338.71 tp: 4375.91 [done]
+CJ	0	22:57:04.342	Core 1	2026.09.22 05:00:00   [SMC POI] BUY LIMIT 0.18 lots @ 4341.42  SL 4338.71  TP 4375.91  RR 12.73
+EG	0	22:57:04.342	Core 1	2026.09.22 05:17:41   order [#19 buy limit 0.18 XAUUSD at 4341.42] triggered
+FE	0	22:57:04.342	Core 1	2026.09.22 05:17:41   deal #16 buy 0.18 XAUUSD at 4341.42 done (based on order #19)
+PN	0	22:57:04.342	Core 1	2026.09.22 05:17:41   deal performed [#16 buy 0.18 XAUUSD at 4341.42]
+FM	0	22:57:04.342	Core 1	2026.09.22 05:17:41   order performed buy 0.18 at 4341.42 [#19 buy limit 0.18 XAUUSD at 4341.42]
+KL	0	22:57:04.342	Core 1	2026.09.22 05:17:41   R BASE:
+EI	0	22:57:04.342	Core 1	2026.09.22 05:17:41     PositionID=19  Direction=BUY
+GQ	0	22:57:04.342	Core 1	2026.09.22 05:17:41     Fill=4341.42  OriginalSL=4338.71  TP=4375.91  Lots=0.18
+HM	0	22:57:04.342	Core 1	2026.09.22 05:17:41     InitialRiskMoney=$48.78  (riskValid=true)
+KK	0	22:57:04.342	Core 1	2026.09.22 07:01:31   stop loss triggered #19 buy 0.18 XAUUSD 4341.42 sl: 4338.71 tp: 4375.91 [#20 sell 0.18 XAUUSD at 4338.71]
+ND	0	22:57:04.342	Core 1	2026.09.22 07:01:31   deal #17 sell 0.18 XAUUSD at 4338.67 done (based on order #20)
+PK	0	22:57:04.342	Core 1	2026.09.22 07:01:31   deal performed [#17 sell 0.18 XAUUSD at 4338.67]
+HK	0	22:57:04.342	Core 1	2026.09.22 07:01:31   order performed sell 0.18 at 4338.67 [#20 sell 0.18 XAUUSD at 4338.71]
+MP	0	22:57:04.342	Core 1	2026.09.22 07:01:31   R RESULT:
+RE	0	22:57:04.342	Core 1	2026.09.22 07:01:31     PositionID=19  InitialRiskMoney=$48.78
+RK	0	22:57:04.342	Core 1	2026.09.22 07:01:31     Gross=$-49.50  Commission=$0.00  Swap=$0.00  Fee=$0.00  NetPnL=$-49.50
+FK	0	22:57:04.342	Core 1	2026.09.22 07:01:31     FinalR=-1.01
+GL	0	22:57:04.342	Core 1	2026.09.22 07:15:00   [SMC POI] BEAR BOS @ 2026.09.22 07:00 (broke swing 4339.44 from 2026.09.22 06:00). POI 4345.33-4349.31 (candle 2026.09.22 06:15). Target starts 4334.83
+EJ	0	22:57:04.342	Core 1	2026.09.22 08:15:00   [SMC POI] SHORT setup dropped: POI touched before any liquidity sweep
+ID	0	22:57:04.342	Core 1	2026.09.22 08:30:00   [SMC POI] BEAR BOS @ 2026.09.22 08:15 (broke swing 4334.83 from 2026.09.22 07:00). POI 4343.00-4347.29 (candle 2026.09.22 08:00). Target starts 4322.36
+NO	0	22:57:04.342	Core 1	2026.09.22 12:00:00   [SMC POI] SWEEP of post-BOS high 4324.24 @ 2026.09.22 11:45. Target frozen at 4291.23
+DL	0	22:57:04.342	Core 1	2026.09.22 12:00:00   RISK CHECK:
+OH	0	22:57:04.342	Core 1	2026.09.22 12:00:00     Equity=$10146.67  TargetRisk=0.50% ($50.73)
+QN	0	22:57:04.342	Core 1	2026.09.22 12:00:00     Entry=4343.00  SL=4347.59  1-lot SL loss=$459.00  Lots=0.11
+KS	0	22:57:04.342	Core 1	2026.09.22 12:00:00     ProjectedLoss=$50.49  ActualRisk=0.4976%  (ceiling 0.5500%)
+NM	0	22:57:04.342	Core 1	2026.09.22 12:00:00   sell limit 0.11 XAUUSD at 4343.00 sl: 4347.59 tp: 4291.23 (4329.96 / 4330.48)
+LQ	0	22:57:04.342	Core 1	2026.09.22 12:00:00   CTrade::OrderSend: sell limit 0.11 XAUUSD at 4343.00 sl: 4347.59 tp: 4291.23 [done]
+OR	0	22:57:04.342	Core 1	2026.09.22 12:00:00   [SMC POI] SELL LIMIT 0.11 lots @ 4343.00  SL 4347.59  TP 4291.23  RR 11.28
+IM	0	22:57:04.342	Core 1	2026.09.22 15:31:39   order [#21 sell limit 0.11 XAUUSD at 4343.00] triggered
+ME	0	22:57:04.342	Core 1	2026.09.22 15:31:39   deal #18 sell 0.11 XAUUSD at 4343.01 done (based on order #21)
+DK	0	22:57:04.342	Core 1	2026.09.22 15:31:39   deal performed [#18 sell 0.11 XAUUSD at 4343.01]
+PG	0	22:57:04.342	Core 1	2026.09.22 15:31:39   order performed sell 0.11 at 4343.01 [#21 sell limit 0.11 XAUUSD at 4343.00]
+OQ	0	22:57:04.342	Core 1	2026.09.22 15:31:39   R BASE:
+HK	0	22:57:04.342	Core 1	2026.09.22 15:31:39     PositionID=21  Direction=SELL
+QJ	0	22:57:04.342	Core 1	2026.09.22 15:31:39     Fill=4343.01  OriginalSL=4347.59  TP=4291.23  Lots=0.11
+IS	0	22:57:04.342	Core 1	2026.09.22 15:31:39     InitialRiskMoney=$50.38  (riskValid=true)
+CQ	0	22:57:04.342	Core 1	2026.09.22 20:52:47   stop loss triggered #21 sell 0.11 XAUUSD 4343.01 sl: 4347.59 tp: 4291.23 [#22 buy 0.11 XAUUSD at 4347.59]
+HP	0	22:57:04.342	Core 1	2026.09.22 20:52:47   deal #19 buy 0.11 XAUUSD at 4348.29 done (based on order #22)
+NR	0	22:57:04.342	Core 1	2026.09.22 20:52:47   deal performed [#19 buy 0.11 XAUUSD at 4348.29]
+ED	0	22:57:04.342	Core 1	2026.09.22 20:52:47   order performed buy 0.11 at 4348.29 [#22 buy 0.11 XAUUSD at 4347.59]
+GJ	0	22:57:04.342	Core 1	2026.09.22 20:52:47   R RESULT:
+RN	0	22:57:04.342	Core 1	2026.09.22 20:52:47     PositionID=21  InitialRiskMoney=$50.38
+DF	0	22:57:04.342	Core 1	2026.09.22 20:52:47     Gross=$-58.08  Commission=$0.00  Swap=$0.00  Fee=$0.00  NetPnL=$-58.08
+KD	0	22:57:04.342	Core 1	2026.09.22 20:52:47     FinalR=-1.15
+GS	0	22:57:04.342	Core 1	2026.09.22 21:00:00   [SMC POI] BULL BOS @ 2026.09.22 20:45 (broke swing 4341.78 from 2026.09.22 19:45). POI 4322.54-4331.04 (candle 2026.09.22 19:00). Target starts 4352.84
+PK	0	22:57:04.342	Core 1	final balance 10088.59 USD
+QO	0	22:57:04.342	Core 1	2026.09.22 23:59:58   ==================== TWI SMC POI SUMMARY ====================
+OL	0	22:57:04.342	Core 1	2026.09.22 23:59:58   Funnel: BOS 24 -> no POI 0 -> armed 24 -> POI touched before sweep 10 -> closed through POI 1 -> swept 12
+IL	0	22:57:04.342	Core 1	2026.09.22 23:59:58           swept -> RR too low 0 | spread 0 | stops level 0 | risk reject 0 | order fail 0 -> placed 12
+DF	0	22:57:04.342	Core 1	2026.09.22 23:59:58           placed -> target taken first 2 | timed out 0 -> FILLED 9  (filled beyond SL 0)
+NF	0	22:57:04.342	Core 1	2026.09.22 23:59:58           Friday-cutoff cancellations (setup or pending) 1
+FP	0	22:57:04.342	Core 1	2026.09.22 23:59:58   Trades 9  W 2  L 7  BE 0  WinRate 22.2%
+GO	0	22:57:04.342	Core 1	2026.09.22 23:59:58   Net $88.59  PF 1.25  Max consecutive losses 3
+DK	0	22:57:04.342	Core 1	2026.09.22 23:59:58   Total R 3.33  Avg R 0.370  (R_INVALID 0)
+CE	0	22:57:04.342	Core 1	2026.09.22 23:59:58   BUY 4 (W 1, R -0.46)  SELL 5 (W 1, R 3.79)
+GR	0	22:57:04.342	Core 1	2026.09.22 23:59:58   Costs: commission $0.00  swap $-0.20  fee $0.00 (all deals, entry + exit)
+HO	0	22:57:04.342	Core 1	2026.09.22 23:59:58   ==============================================================
+CL	0	22:57:04.342	Core 1	XAUUSD,M15: 7322947 ticks, 736 bars generated. Environment synchronized in 0:00:05.046. Test passed in 0:00:02.289 (including ticks preprocessing 0:00:00.438).
+KH	0	22:57:04.342	Core 1	XAUUSD,M15: total time from login to stop testing 0:00:07.335 (including 0:00:05.046 for history data synchronization)
+DK	0	22:57:04.342	Core 1	361 Mb memory used including 2 Mb of history data, 192 Mb of tick data
+KP	0	22:57:04.342	Core 1	log file "C:\Users\aland\AppData\Roaming\MetaQuotes\Tester\C460888076DC2C8BC8FAA784199EBB14\Agent-127.0.0.1-3000\logs\20260923.log" written
+FF	0	22:57:04.396	Tester	automatic testing finished
+FR	0	22:57:04.396	Core 1	connection closed

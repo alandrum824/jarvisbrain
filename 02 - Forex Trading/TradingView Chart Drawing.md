@@ -16,6 +16,13 @@ How to read and draw on Adam's live TradingView chart, reliably and fast. Discov
 
 **Standing rule: never edit Pine via raw CDP.** Reading/navigating/screenshotting over CDP is fine and proven; Pine source editing requires `tradingview-mcp`'s `pine_open`/`pine_get_source`/`pine_save` (full-source via the app's own API) plus the make-a-copy-then-verify-script-count flow documented in [[Malaysian SNR x Orderflow]].
 
+**New-script method (banked 2026-09-28 after it went wrong):** `pine_new` does NOT reliably open a blank slot. On 2026-09-28 it reported success but left **TWI Pat Zones Fib** open, and `pine_smart_compile` saved the new code over it (it clicks Save). The working method:
+1. Open the script-name dropdown in the Pine editor → **Make a copy…** (the menu text uses a real "…" character, not three dots) → type the new name → Make copy. Check that the editor title now shows the new name.
+2. Load the source from the vault file: `node src/cli/index.js pine set --file "<vault .pine path>"` from `C:\Users\aland\tradingview-mcp`. This avoids pasting the full source through a tool call.
+3. `pine_smart_compile` (compiles and saves).
+**Recovery if a script gets overwritten:** every save is a version. Fetch an old version from the page context with `fetch('https://pine-facade.tradingview.com/pine-facade/get/<encoded USER;id>/<version>', {credentials:'include'})` → `.source`, then hash-compare it to the vault copy, load the good source with `pine set --file`, and save. Pat Zones Fib was restored this way, verified byte-identical (after CRLF→LF).
+**Basic plan: 2 indicators per chart.** Add-to-chart is the ▷ button next to the script title (CSS x≈905, y≈79 at DPR 1.5); it throws an upgrade popup if the chart is over the cap.
+
 ## Earlier same session — raw CDP connection (still valid for read/navigate/screenshot)
 Transport 0 (`tradingview-mcp`) below is only set up on Adam's main desk machine (`C:\Users\aland\...`) — not installed here. On this box, connected via raw CDP instead (Transport 1): killed running `TradingView.exe`, relaunched with `--remote-debugging-port=9222` from `C:\Program Files\WindowsApps\TradingView.Desktop_3.3.0.7992_x64__n534cwy3pjxzj\` (version folder will drift on updates — glob it fresh each time). Navigated the blank "New tab" page to `https://www.tradingview.com/chart/` and it auto-redirected to the same saved layout (`uJnBMo6l`) as the other machine — same account, cloud-synced layout, already logged in, no auth step needed. Confirmed via screenshot: CADJPY 30m/FXCM, Pafx Secret indicator, "TWI TN" label live on chart.
 

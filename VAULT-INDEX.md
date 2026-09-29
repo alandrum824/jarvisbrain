@@ -29,6 +29,11 @@ I trade forex using MetaTrader 5 and TradingView. My trading is handled by an EA
 My theme park idea: a faith-themed family park built around a central plaza ([[Promise Plaza]]) and five other named lands. Idea stage as of 2026-08-24 — see [[Promiseland Park]] for the full project skeleton.
 - **Status:** Idea
 
+## Nocturnal Chaos Coffee (03 - Personal/Nocturnal Chaos Coffee)
+
+I own Nocturnal Chaos Coffee, a family coffee brand I'm building with April (renamed from "O For the Love of Coffee"). Shopify dropship with Temecula Coffee Roasters; first product "Before the Chaos." Family comes first. See [[Nocturnal Chaos Coffee]].
+- **Status:** Pre-launch
+
 ## Vault Structure
 
 ```

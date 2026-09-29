@@ -1,0 +1,316 @@
+//@version=6
+// TWI Pat Zones Fib (2026-09-25) - Trade With Pat's method, per Adam: "He trades on 1 hr zones with m5 entry retracement at 70-80 fib zones".
+// ZONES: supply / demand from swing pivots on the zone timeframe (default 1H): supply = pivot-high candle from its body top to its high,
+//   demand = pivot-low candle from its low to its body bottom. Non-repainting (previous closed zone-TF bar, lookahead on). Removed when
+//   price closes through the far side.
+// LEG: on the chart timeframe (built for M5), a leg starts at a confirmed swing high (for sells) that sits in or near a supply zone and runs to
+//   the lowest low since (buys mirror this from a swing low near demand). Legs smaller than x ATR are ignored.
+// ENTRY: the 70-80% Fibonacci retracement of that leg is shaded. SELL when price retraces into the band and rejects (default: the candle
+//   trades up to the 70% line and closes back below it, bearish), or optionally a limit at the band's midpoint. One entry per leg.
+//   A close beyond the leg's origin kills the setup.
+// SCORECARD: stop = beyond the leg origin + buffer, target = the leg extreme (full retrace back) or an R multiple. Conservative OHLC:
+//   a bar touching both stop and target counts as a LOSS; on a limit fill bar only the stop counts. Confirmed bars only.
+indicator("TWI Pat Zones Fib", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+grpZ = "Zones (higher timeframe)"
+zoneTF = input.timeframe("60", "Zone timeframe", group = grpZ)
+zLen   = input.int(3, "Zone swing size (zone-TF bars each side)", minval = 1, maxval = 10, group = grpZ)
+zKeep  = input.int(4, "Zones kept per side", minval = 1, maxval = 10, group = grpZ)
+zTol   = input.float(0.5, "Leg must start within x ATR of a zone", minval = 0, step = 0.1, group = grpZ)
+cSup   = input.color(color.new(color.red, 82), "Supply zone", group = grpZ)
+cDem   = input.color(color.new(color.teal, 82), "Demand zone", group = grpZ)
+
+grpE = "Entry (chart timeframe)"
+legLen  = input.int(3, "Swing size (bars each side)", minval = 1, maxval = 10, group = grpE)
+minLeg  = input.float(1.5, "Minimum leg size (x ATR)", minval = 0, step = 0.25, group = grpE)
+fibA    = input.float(0.70, "Fib zone from", minval = 0.3, maxval = 0.95, step = 0.01, group = grpE)
+fibB    = input.float(0.80, "Fib zone to", minval = 0.35, maxval = 0.99, step = 0.01, group = grpE)
+trig    = input.string("Rejection close", "Entry trigger", options = ["Rejection close", "Limit at band mid"], group = grpE)
+stopBuf = input.float(0.1, "Stop buffer beyond the leg origin (x ATR)", minval = 0, step = 0.05, group = grpE)
+cBand   = input.color(color.new(color.orange, 70), "Fib band", group = grpE)
+
+grpS = "Scorecard"
+showScore = input.bool(true, "Show scorecard", group = grpS)
+tgtMode   = input.string("Leg extreme", "Target", options = ["Leg extreme", "R multiple"], group = grpS)
+tgtR      = input.float(2.0, "Target R (when R multiple)", minval = 0.5, step = 0.25, group = grpS)
+maxHold   = input.int(96, "Close unresolved trades after N bars", minval = 5, group = grpS)
+showMarks = input.bool(true, "Mark each result on the chart", group = grpS)
+
+type Zone
+    box   bx
+    float top
+    float bot
+    int   t
+
+type Trade
+    bool  bull
+    float entry
+    float sl
+    float tp
+    int   bar0
+    bool  limitFill
+
+var supZ = array.new<Zone>()
+var demZ = array.new<Zone>()
+var trades = array.new<Trade>()
+var sN = array.new_float(2, 0.0)   // 0 = sells, 1 = buys
+var sW = array.new_float(2, 0.0)
+var sR = array.new_float(2, 0.0)
+
+atr = ta.atr(14)
+
+// ---------- higher-timeframe zones (previous closed zone-TF bar, no repaint) ----------
+zoneData() =>
+    ph = ta.pivothigh(high, zLen, zLen)[1]
+    pl = ta.pivotlow(low, zLen, zLen)[1]
+    k = zLen + 1
+    [not na(ph), high[k], math.max(open[k], close[k]), not na(pl), math.min(open[k], close[k]), low[k], time[k]]
+[zNewS, zSTop, zSBot, zNewD, zDTop, zDBot, zTime] = request.security(syminfo.tickerid, zoneTF, zoneData(), lookahead = barmerge.lookahead_on)
+
+var int lastSupT = na
+var int lastDemT = na
+
+addZone(array<Zone> zs, float top, float bot, int t, bool supply) =>
+    float b = bot
+    float tp = top
+    minH = atr * 0.25
+    if supply and tp - b < minH
+        b := tp - minH
+    if not supply and tp - b < minH
+        tp := b + minH
+    z = Zone.new(box.new(t, tp, time, b, xloc = xloc.bar_time, border_color = supply ? color.new(color.red, 40) : color.new(color.teal, 40),
+                         bgcolor = supply ? cSup : cDem, text = supply ? "H1 supply" : "H1 demand", text_size = size.tiny,
+                         text_color = supply ? color.new(color.red, 20) : color.new(color.teal, 20), text_halign = text.align_left), tp, b, t)
+    array.push(zs, z)
+    if array.size(zs) > zKeep
+        box.delete(array.shift(zs).bx)
+    0
+
+stepZones(array<Zone> zs, bool supply) =>
+    if array.size(zs) > 0
+        for i = array.size(zs) - 1 to 0
+            z = array.get(zs, i)
+            if supply ? close > z.top : close < z.bot
+                box.delete(z.bx)
+                array.remove(zs, i)
+            else
+                box.set_right(z.bx, time)
+    0
+
+nearZone(float px, bool supply) =>
+    bool ok = false
+    tol = zTol * atr
+    zs = supply ? supZ : demZ
+    for z in zs
+        if px >= z.bot - tol and px <= z.top + tol
+            ok := true
+    ok
+
+// ---------- trades ----------
+scoreResult(Trade t, float r) =>
+    k = t.bull ? 1 : 0
+    array.set(sN, k, array.get(sN, k) + 1)
+    if r > 0
+        array.set(sW, k, array.get(sW, k) + 1)
+    array.set(sR, k, array.get(sR, k) + r)
+    if showMarks
+        label.new(bar_index, r > 0 ? t.tp : t.sl, (r > 0 ? "✔ +" : "✖ ") + str.tostring(r, "#.##") + "R",
+                  style = label.style_none, textcolor = r > 0 ? color.lime : color.red, size = size.tiny)
+    0
+
+stepTrades() =>
+    if array.size(trades) > 0
+        for i = array.size(trades) - 1 to 0
+            t = array.get(trades, i)
+            risk = math.abs(t.entry - t.sl)
+            hitSL = t.bull ? low <= t.sl : high >= t.sl
+            hitTP = t.bull ? high >= t.tp : low <= t.tp
+            if hitSL
+                scoreResult(t, -1.0)
+                array.remove(trades, i)
+            else if hitTP
+                scoreResult(t, math.abs(t.tp - t.entry) / risk)
+                array.remove(trades, i)
+            else if bar_index - t.bar0 >= maxHold
+                scoreResult(t, (t.bull ? close - t.entry : t.entry - close) / risk)
+                array.remove(trades, i)
+    0
+
+openTrade(bool bull, float entry, float origin, float extreme, bool limitFill) =>
+    buf = stopBuf * atr
+    sl = bull ? origin - buf : origin + buf
+    risk = bull ? entry - sl : sl - entry
+    if risk > 0
+        tp = tgtMode == "Leg extreme" ? extreme : (bull ? entry + tgtR * risk : entry - tgtR * risk)
+        if bull ? tp > entry : tp < entry
+            t = Trade.new(bull, entry, sl, tp, bar_index, limitFill)
+            // limit fill: a fill bar that also reaches the stop is a loss (conservative)
+            if limitFill and (bull ? low <= sl : high >= sl)
+                scoreResult(t, -1.0)
+            else
+                array.push(trades, t)
+    0
+
+// ---------- chart-timeframe legs ----------
+mph = ta.pivothigh(high, legLen, legLen)
+mpl = ta.pivotlow(low, legLen, legLen)
+lowAfter  = ta.lowest(low, legLen)
+lowAfterB = bar_index + ta.lowestbars(low, legLen)
+highAfter  = ta.highest(high, legLen)
+highAfterB = bar_index + ta.highestbars(high, legLen)
+
+var float swH = na
+var int   swHbar = na
+var float bearLow = na
+var int   bearLowBar = na
+var bool  bearDead = true
+var bool  bearQual = false
+var box   bearBand = na
+
+var float swL = na
+var int   swLbar = na
+var float bullHigh = na
+var int   bullHighBar = na
+var bool  bullDead = true
+var bool  bullQual = false
+var box   bullBand = na
+
+if barstate.isconfirmed
+    stepTrades()
+    // new higher-timeframe zones
+    if zNewS and (na(lastSupT) or zTime != lastSupT)
+        lastSupT := zTime
+        addZone(supZ, zSTop, zSBot, zTime, true)
+    if zNewD and (na(lastDemT) or zTime != lastDemT)
+        lastDemT := zTime
+        addZone(demZ, zDTop, zDBot, zTime, false)
+    stepZones(supZ, true)
+    stepZones(demZ, false)
+
+    // ---- SELL side: swing high near supply -> leg down -> retrace into 70-80% ----
+    bool newBearLeg = false
+    if not na(mph)
+        if not na(bearBand) and not bearDead
+            box.delete(bearBand)
+        bearBand := na
+        swH := mph
+        swHbar := bar_index - legLen
+        bearLow := lowAfter
+        bearLowBar := lowAfterB
+        bearDead := false
+        bearQual := nearZone(swH, true)
+        newBearLeg := true
+    if not bearDead and not na(swH)
+        extended = low < bearLow and not newBearLeg
+        if not newBearLeg and not extended and bearQual and bearLowBar > swHbar and swH - bearLow >= minLeg * atr
+            lA = bearLow + fibA * (swH - bearLow)
+            lB = bearLow + fibB * (swH - bearLow)
+            mid = (lA + lB) / 2
+            if na(bearBand)
+                bearBand := box.new(swHbar, lB, bar_index + 5, lA, border_color = color.new(color.orange, 30), bgcolor = cBand,
+                                    text = "SELL " + str.tostring(fibA * 100, "#") + "-" + str.tostring(fibB * 100, "#") + "%", text_size = size.tiny, text_color = color.orange)
+            else
+                box.set_top(bearBand, lB)
+                box.set_bottom(bearBand, lA)
+                box.set_right(bearBand, bar_index + 5)
+            bool fired = false
+            float entry = na
+            bool isLimit = trig == "Limit at band mid"
+            if isLimit and high >= mid
+                fired := true
+                entry := mid
+            if not isLimit and high >= lA and close < lA and close < open
+                fired := true
+                entry := close
+            if fired
+                bearDead := true
+                box.set_right(bearBand, bar_index)
+                box.set_bgcolor(bearBand, color.new(color.gray, 80))
+                label.new(bar_index, high, "SELL", style = label.style_label_down, color = color.new(color.red, 0), textcolor = color.white, size = size.small,
+                          tooltip = "Retrace into the " + str.tostring(fibA * 100, "#") + "-" + str.tostring(fibB * 100, "#") + "% fib of the leg " +
+                                    str.tostring(swH, format.mintick) + " -> " + str.tostring(bearLow, format.mintick) + ", leg started at H1 supply")
+                alert("TWI Pat Zones Fib: SELL - " + syminfo.ticker + " retrace into the 70-80% fib from H1 supply at " + str.tostring(entry, format.mintick), alert.freq_once_per_bar_close)
+                openTrade(false, entry, swH, bearLow, isLimit)
+        if extended
+            bearLow := low
+            bearLowBar := bar_index
+        if close > swH
+            bearDead := true
+            if not na(bearBand)
+                box.delete(bearBand)
+            bearBand := na
+
+    // ---- BUY side: swing low near demand -> leg up -> retrace into 70-80% ----
+    bool newBullLeg = false
+    if not na(mpl)
+        if not na(bullBand) and not bullDead
+            box.delete(bullBand)
+        bullBand := na
+        swL := mpl
+        swLbar := bar_index - legLen
+        bullHigh := highAfter
+        bullHighBar := highAfterB
+        bullDead := false
+        bullQual := nearZone(swL, false)
+        newBullLeg := true
+    if not bullDead and not na(swL)
+        extended = high > bullHigh and not newBullLeg
+        if not newBullLeg and not extended and bullQual and bullHighBar > swLbar and bullHigh - swL >= minLeg * atr
+            lA = bullHigh - fibA * (bullHigh - swL)
+            lB = bullHigh - fibB * (bullHigh - swL)
+            mid = (lA + lB) / 2
+            if na(bullBand)
+                bullBand := box.new(swLbar, lA, bar_index + 5, lB, border_color = color.new(color.orange, 30), bgcolor = cBand,
+                                    text = "BUY " + str.tostring(fibA * 100, "#") + "-" + str.tostring(fibB * 100, "#") + "%", text_size = size.tiny, text_color = color.orange)
+            else
+                box.set_top(bullBand, lA)
+                box.set_bottom(bullBand, lB)
+                box.set_right(bullBand, bar_index + 5)
+            bool fired = false
+            float entry = na
+            bool isLimit = trig == "Limit at band mid"
+            if isLimit and low <= mid
+                fired := true
+                entry := mid
+            if not isLimit and low <= lA and close > lA and close > open
+                fired := true
+                entry := close
+            if fired
+                bullDead := true
+                box.set_right(bullBand, bar_index)
+                box.set_bgcolor(bullBand, color.new(color.gray, 80))
+                label.new(bar_index, low, "BUY", style = label.style_label_up, color = color.new(color.teal, 0), textcolor = color.white, size = size.small,
+                          tooltip = "Retrace into the " + str.tostring(fibA * 100, "#") + "-" + str.tostring(fibB * 100, "#") + "% fib of the leg " +
+                                    str.tostring(swL, format.mintick) + " -> " + str.tostring(bullHigh, format.mintick) + ", leg started at H1 demand")
+                alert("TWI Pat Zones Fib: BUY - " + syminfo.ticker + " retrace into the 70-80% fib from H1 demand at " + str.tostring(entry, format.mintick), alert.freq_once_per_bar_close)
+                openTrade(true, entry, swL, bullHigh, isLimit)
+        if extended
+            bullHigh := high
+            bullHighBar := bar_index
+        if close < swL
+            bullDead := true
+            if not na(bullBand)
+                box.delete(bullBand)
+            bullBand := na
+
+// ---------- scorecard ----------
+var table sc = table.new(position.bottom_right, 5, 5, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast and showScore
+    table.cell(sc, 0, 0, "PAT ZONES FIB", text_color = color.yellow, text_size = size.tiny)
+    table.cell(sc, 1, 0, "Trades", text_color = color.white, text_size = size.tiny)
+    table.cell(sc, 2, 0, "Win %", text_color = color.white, text_size = size.tiny)
+    table.cell(sc, 3, 0, "Total", text_color = color.white, text_size = size.tiny)
+    table.cell(sc, 4, 0, "Avg R", text_color = color.white, text_size = size.tiny)
+    names = array.from("Sells", "Buys", "ALL")
+    for k = 0 to 2
+        n = k < 2 ? array.get(sN, k) : array.sum(sN)
+        w = k < 2 ? array.get(sW, k) : array.sum(sW)
+        r = k < 2 ? array.get(sR, k) : array.sum(sR)
+        col = r > 0 ? color.lime : r < 0 ? color.red : color.gray
+        table.cell(sc, 0, k + 1, array.get(names, k), text_color = k == 2 ? color.yellow : color.white, text_size = size.tiny)
+        table.cell(sc, 1, k + 1, str.tostring(n, "#"), text_color = color.white, text_size = size.tiny)
+        table.cell(sc, 2, k + 1, n > 0 ? str.tostring(100 * w / n, "#") + "%" : "-", text_color = color.white, text_size = size.tiny)
+        table.cell(sc, 3, k + 1, str.tostring(r, "+#.##;-#.##") + "R", text_color = col, text_size = size.tiny)
+        table.cell(sc, 4, k + 1, n > 0 ? str.tostring(r / n, "+#.##;-#.##") : "-", text_color = col, text_size = size.tiny)
+    table.cell(sc, 0, 4, trig + " | stop past leg | target " + (tgtMode == "Leg extreme" ? "leg extreme" : str.tostring(tgtR, "#.##") + "R") + " | SL-first",
+               text_color = color.gray, text_size = size.tiny)

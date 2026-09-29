@@ -63,6 +63,14 @@ Claude Code ships a native **Remote Control** feature that pairs a live local se
 
 Once paired, the phone's Claude app connects to *that exact session* — same context, same files, same everything, because it's literally the same running process, not a copy.
 
+## VPS access (Remote Desktop)
+- **Host:** Database Mart LLC, "Basic Windows VPS" (renews ~17th of each month).
+- **Address:** `38.247.137.156:1097` since the **2026-09-22 migration** (old: `108.181.193.243:1097`, now dead). RDP runs on custom port **1097**, not 3389.
+- **Login:** `ADAMdministrator`; the password is in Adam's saved Remote Desktop credentials, never in the vault.
+- Connect from the desktop: `mstsc /v:38.247.137.156:1097`.
+- Database Mart's own emails don't land in alandrum24@gmail.com (only the calendar copies do), so their account is tied to another inbox.
+- Their migration notice asked for the login by email. Don't send a password in an email reply; if they really need it, give it through their support portal ticket.
+
 ## Machine topology (corrected 2026-09-14)
 This JARVIS Bridge / Claude Code machine (`C:\Users\Administrator`, Windows Server) is Adam's **VPS** — always-on, no lid, no sleep concern. **barehands, voice-line, and the webcam/mic hardware live on Adam's separate desktop machine** (the old `C:\Users\aland` paths elsewhere in this vault refer to that desktop, not this VPS). The lid-close power-management fix below was real work done on that desktop at the time, not this machine — kept for reference in case that desktop is ever the one running this bridge again, but don't apply it here.
 
@@ -71,7 +79,7 @@ That machine is a laptop. Closing the lid sleeps it by default, which kills the 
 - `powercfg` lid-close action was hidden by default — unhid it: `powercfg -attributes SUB_BUTTONS LIDACTION -ATTRIB_HIDE`.
 - Set to **"Do nothing" on AC power** (stays fully awake, closed, while plugged in) and **left as "Sleep" on battery** (so it doesn't overheat closed in a bag when unplugged).
 
-So: for phone access to that desktop to work with the lid closed, it needs to be on AC power. This VPS has no such concern — it's always on.
+So: for phone access to that desktop to work with the lid closed, it needs to be on AC power. **Verified 2026-09-28:** remote access dropping on lid close was a charger that was plugged in but not delivering power (Windows showed PowerLine Offline). Check `[System.Windows.Forms.SystemInformation]::PowerStatus` and the Kernel-Power 42/105 events before touching settings; once power was really online, lid-closed remote access worked. This VPS has no such concern — it's always on.
 
 ## The abandoned path: SSH + Tailscale
 First approach tried was enabling OpenSSH Server + Tailscale for true remote terminal access. Ran into a real wall: Claude Code's auto-mode classifier blocks self-triggered UAC elevation (can't launch an elevated process to install OpenSSH Server), by design — a safety rail, not a bug to route around. The full setup script still exists at `C:\Users\aland\AppData\Local\Temp\claude\setup\setup-ssh.ps1` if ever needed for something Remote Control can't do (e.g. reaching this machine when Claude Code itself isn't already running) — would need Adam to run it himself from an elevated PowerShell.

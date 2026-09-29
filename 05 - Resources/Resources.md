@@ -29,3 +29,5 @@ Cross-project reference material, templates, and Jobs that don't belong to a sin
 - [[StrumMaster]] — Adam's guitar-learning Base44 app: real tuner (confirmed working), real chord/song lookup, and an interactive Play Mode with real mic-based chord detection built out 2026-09-13/14.
 - [[Zapier MCP]] — claude.ai Zapier connector, live 2026-09-18: 5 apps provisioned (Drive, Sheets, Shopify, Facebook Pages, Instagram), read path tested, write actions left enabled at Adam's call; working-method quirks banked.
 - [[Finding Polymarket Edges]] — the recurring "give me bets" job: devig the sharp book, compare to Polymarket, bet only ≥5pt gaps. The edge is Polymarket's softness, not out-predicting DraftKings.
+- [[Playwright MCP]] — headless browser MCP for Jarvis (pinned v0.0.83, `.mcp.json`, isolated profile); added 2026-09-29. Also records why ECC was rejected.
+- [[Jarvis Upgrades v2 (2026-09-29)]] — Grok's researched upgrade list for Jarvis (auto-memory off, version pinning, managed settings, Bridge hardening, investor login, etc.). Reference only; nothing executed.

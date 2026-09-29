@@ -57,6 +57,7 @@ These are the four places where an earlier TWI build already paid the discovery 
 - **Compiled clean, deployed to the live terminal, NOT attached to any chart.**
 - **Zero backtests. No evidence of any kind yet** — nothing here has been measured, and every default above is inherited reasoning from other strategies, not a result on this one.
 - **Real next step: a backtest on a long window before judging anything.** Per [[MBT (MT5 Backtest Toolkit)]], read the input dump at the top of the tester log first and confirm the values match intent — `MQL5\Profiles\Tester\TWILiquiditySweepBOS.set` will silently override compiled defaults, which cost a full evening on two earlier EAs.
+- **V1 LOCK (Adam, 2026-09-23):** no new filters, targets, BE, or confluence before an honest real-tick baseline. The post-baseline hypothesis list H1–H8 covers both EAs and lives in [[TWI Liquidity Sweep OB EA]]. It's tested one at a time, after the baseline.
 
 ## Related
 - [[TWI SR Sweep Reclaim]] — where the no-invented-sweep-depth, persistent-registry, and RR-gate findings come from

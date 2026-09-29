@@ -1,0 +1,237 @@
+//@version=6
+// TWI ORB Trend Retest — built 2026-09-24 from a video Adam shared ("Trending markets (up trend) - aggressive buy entries").
+// LONG (short mirrored):
+//  1. Trend  - higher-timeframe (default 15m) market structure is bullish: last confirmed swing high > the one before
+//              AND last confirmed swing low > the one before (HH + HL). Read from the previous closed HTF bar - no repaint.
+//  2. Range  - opening range = high/low of the session window (default 09:30-09:45 New York) on the chart timeframe (5m).
+//  3. Break  - a candle CLOSES above the range high inside the entry window.
+//  4. Entry  - "top of the range entry after break": limit at the range high, filled on the pullback (from the next bar).
+//              Optional: enter at the breakout candle's close instead.
+//  5. Stop   - below the range low minus a buffer (% of range height). Target = entry + RR x risk (default 2.7R).
+//  6. Cancel - close back below the range low, no retest within N bars, target reached before the retest, window closes.
+//  One trade per day. Open trades are closed at the flat-by time.
+// All logic runs on CONFIRMED bars. Stats come from bar OHLC: a bar touching both SL and TP = LOSS; on the fill bar only SL counts.
+indicator("TWI ORB Trend Retest", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ---------- inputs ----------
+grpOR = "Opening range"
+tz        = input.string("America/New_York", "Timezone", group = grpOR)
+orSess    = input.session("0930-0945", "Opening range", group = grpOR)
+winSess   = input.session("0945-1200", "Entry window", group = grpOR)
+flatHour  = input.int(16, "Flat-by hour", minval = 0, maxval = 23, group = grpOR)
+flatMin   = input.int(0,  "Flat-by minute", minval = 0, maxval = 59, group = grpOR)
+
+grpTr = "Trend filter"
+useTrend  = input.bool(true, "Only trade with the higher-timeframe trend", group = grpTr)
+trendTF   = input.timeframe("15", "Trend timeframe", group = grpTr)
+swingN    = input.int(3, "Trend swing bars (each side)", minval = 1, group = grpTr)
+
+grpE = "Entry / exit"
+entryMode  = input.string("Retest of range edge", "Entry", options = ["Retest of range edge", "Breakout candle close"], group = grpE)
+allowLong  = input.bool(true, "Longs", group = grpE)
+allowShort = input.bool(true, "Shorts", group = grpE)
+slBufPct   = input.float(10.0, "SL buffer (% of range height)", minval = 0, step = 5, group = grpE)
+rr         = input.float(2.7, "Reward : risk", minval = 0.1, step = 0.1, group = grpE)
+retestBars = input.int(12, "Max bars to wait for the retest", minval = 1, group = grpE)
+
+grpV = "Display"
+showHist  = input.bool(true, "Keep past days on chart", group = grpV)
+showTable = input.bool(true, "Show stats table", group = grpV)
+tblPos    = input.string("Bottom right", "Table position", options = ["Top right", "Bottom right", "Bottom left", "Top left"], group = grpV)
+
+// ---------- higher-timeframe structure (non-repainting) ----------
+trendCalc() =>
+    ph = ta.pivothigh(high, swingN, swingN)
+    pl = ta.pivotlow(low, swingN, swingN)
+    var float h1 = na
+    var float h0 = na
+    var float l1 = na
+    var float l0 = na
+    if not na(ph)
+        h0 := h1
+        h1 := ph
+    if not na(pl)
+        l0 := l1
+        l1 := pl
+    bool up = not na(h0) and not na(l0) and h1 > h0 and l1 > l0
+    bool dn = not na(h0) and not na(l0) and h1 < h0 and l1 < l0
+    up ? 1 : dn ? -1 : 0
+
+htfTrend = request.security(syminfo.tickerid, trendTF, trendCalc()[1], lookahead = barmerge.lookahead_on)
+tfOK = timeframe.in_seconds() < timeframe.in_seconds(trendTF)
+longOK  = allowLong  and (not useTrend or htfTrend == 1)
+shortOK = allowShort and (not useTrend or htfTrend == -1)
+
+// ---------- session helpers ----------
+inOR   = not na(time(timeframe.period, orSess, tz))
+inWin  = not na(time(timeframe.period, winSess, tz))
+winEnd = not inWin and inWin[1]
+nowMin = hour(time, tz) * 60 + minute(time, tz)
+flatNow = nowMin >= flatHour * 60 + flatMin
+
+// ---------- state ----------
+var int   st = 0          // 0 idle, 1 building range, 2 watching for break, 3 limit pending, 4 in trade, 5 done for the day
+var float orH = na
+var float orL = na
+var int   orBar = na
+var box   orBox = na
+var bool  isShort = false
+var float entry = na
+var float sl = na
+var float tp = na
+var int   brkBar = na
+var box   bxTP = na
+var box   bxSL = na
+
+var int   nTrades = 0
+var int   nWins = 0
+var float sumR = 0.0
+var float grossW = 0.0
+var float grossL = 0.0
+var int   nBreaks = 0
+var int   nFilled = 0
+
+colTP   = color.new(color.teal, 70)
+colSL   = color.new(color.red, 70)
+colGrey = color.new(color.gray, 85)
+
+extendPos() =>
+    box.set_right(bxTP, bar_index)
+    box.set_right(bxSL, bar_index)
+    0
+
+closeTrade(float r, float px) =>
+    string txt = (r > 0 ? "WIN +" : "LOSS ") + str.tostring(r, "#.##") + "R"
+    label.new(bar_index, px, txt, style = (isShort == (r > 0)) ? label.style_label_up : label.style_label_down,
+              color = r > 0 ? color.new(color.green, 20) : color.new(color.red, 20), textcolor = color.white, size = size.small)
+    alert("TWI ORB: " + (isShort ? "SHORT " : "LONG ") + txt, alert.freq_once_per_bar_close)
+    r
+
+if barstate.isconfirmed
+    // --- new day: opening range starts ---
+    if inOR and not inOR[1]
+        if st == 3
+            box.set_bgcolor(bxTP, colGrey), box.set_bgcolor(bxSL, colGrey)
+        if not showHist
+            box.delete(orBox), box.delete(bxTP), box.delete(bxSL)
+        st := 1
+        orH := high, orL := low, orBar := bar_index
+        orBox := box.new(bar_index, high, bar_index, low, border_color = color.new(color.gray, 40), bgcolor = color.new(color.gray, 80))
+    else if inOR and st == 1
+        orH := math.max(orH, high), orL := math.min(orL, low)
+        box.set_top(orBox, orH), box.set_bottom(orBox, orL), box.set_right(orBox, bar_index)
+
+    // --- range complete ---
+    if st == 1 and not inOR
+        st := 2
+        line.new(orBar, orH, bar_index + 6, orH, color = color.new(color.yellow, 20))
+        line.new(orBar, orL, bar_index + 6, orL, color = color.new(color.yellow, 20))
+        label.new(bar_index + 6, orH, "ORH", style = label.style_none, textcolor = color.yellow, size = size.small)
+        label.new(bar_index + 6, orL, "ORL", style = label.style_none, textcolor = color.yellow, size = size.small)
+
+    // --- 1. manage an open trade ---
+    if st == 4
+        extendPos()
+        hitSL = isShort ? high >= sl : low <= sl
+        hitTP = isShort ? low <= tp : high >= tp
+        risk = math.abs(entry - sl)
+        float r = na
+        float px = na
+        if hitSL or hitTP
+            r := hitSL ? -1.0 : rr
+            px := hitSL ? sl : tp
+        else if flatNow
+            r := (isShort ? entry - close : close - entry) / risk
+            px := close
+        if not na(r)
+            nTrades += 1
+            sumR += r
+            if r > 0
+                nWins += 1
+                grossW += r
+            else
+                grossL += -r
+            closeTrade(r, px)
+            st := 5
+
+    // --- 2. pending retest limit ---
+    else if st == 3
+        extendPos()
+        filled = isShort ? high >= entry : low <= entry
+        if filled
+            st := 4
+            nFilled += 1
+            label.new(bar_index, entry, isShort ? "SELL" : "BUY", style = isShort ? label.style_label_down : label.style_label_up,
+                      color = isShort ? color.red : color.teal, textcolor = color.white, size = size.small)
+            alert("TWI ORB: " + (isShort ? "SELL" : "BUY") + " retest filled @ " + str.tostring(entry, format.mintick), alert.freq_once_per_bar_close)
+            if isShort ? high >= sl : low <= sl      // fill bar: only the stop can be proven
+                nTrades += 1
+                sumR += -1.0
+                grossL += 1.0
+                closeTrade(-1.0, sl)
+                st := 5
+        else
+            string why = ""
+            if isShort ? close > orH : close < orL
+                why := "failed break"
+            else if isShort ? low <= tp : high >= tp
+                why := "ran without retest"
+            else if bar_index - brkBar > retestBars
+                why := "no retest"
+            else if not inWin or flatNow
+                why := "window closed"
+            if why != ""
+                box.set_bgcolor(bxTP, colGrey), box.set_bgcolor(bxSL, colGrey)
+                label.new(bar_index, isShort ? high : low, why, style = isShort ? label.style_label_down : label.style_label_up,
+                          color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
+                st := 5
+
+    // --- 3. watching for the break ---
+    else if st == 2
+        if winEnd or flatNow
+            st := 5
+        else if inWin
+            brkUp = longOK  and close > orH
+            brkDn = shortOK and close < orL
+            if brkUp != brkDn
+                isShort := brkDn
+                nBreaks += 1
+                brkBar := bar_index
+                buf = (orH - orL) * slBufPct / 100.0
+                retest = entryMode == "Retest of range edge"
+                entry := retest ? (isShort ? orL : orH) : close
+                sl := isShort ? orH + buf : orL - buf
+                risk = math.abs(entry - sl)
+                tp := isShort ? entry - rr * risk : entry + rr * risk
+                bxTP := box.new(bar_index, isShort ? entry : tp, bar_index + 1, isShort ? tp : entry, border_color = color.new(color.teal, 40), bgcolor = colTP)
+                bxSL := box.new(bar_index, isShort ? sl : entry, bar_index + 1, isShort ? entry : sl, border_color = color.new(color.red, 40), bgcolor = colSL)
+                label.new(bar_index, isShort ? low : high, (isShort ? "BREAK DOWN" : "BREAK UP") + (retest ? " - limit @ " + str.tostring(entry, format.mintick) : ""),
+                          style = isShort ? label.style_label_up : label.style_label_down, color = color.new(isShort ? color.red : color.teal, 30), textcolor = color.white, size = size.tiny)
+                alert("TWI ORB: " + (isShort ? "break DOWN - sell " : "break UP - buy ") + (retest ? "limit " : "at close ") + str.tostring(entry, format.mintick) +
+                      "  SL " + str.tostring(sl, format.mintick) + "  TP " + str.tostring(tp, format.mintick) + "  (" + str.tostring(rr, "#.#") + "R)", alert.freq_once_per_bar_close)
+                if retest
+                    st := 3
+                else
+                    st := 4
+                    nFilled += 1
+
+// ---------- stats table ----------
+pos = tblPos == "Top right" ? position.top_right : tblPos == "Bottom right" ? position.bottom_right : tblPos == "Bottom left" ? position.bottom_left : position.top_left
+var table tb = table.new(pos, 2, 7, bgcolor = color.new(color.black, 20), border_width = 1)
+if barstate.islast and showTable
+    stTxt = st == 1 ? "building range" : st == 2 ? "watching break" : st == 3 ? (isShort ? "SELL limit set" : "BUY limit set") : st == 4 ? (isShort ? "IN SHORT" : "IN LONG") : "waiting for next range"
+    trTxt = not tfOK ? "use a chart TF below " + trendTF : htfTrend == 1 ? "UP" : htfTrend == -1 ? "DOWN" : "NO TREND"
+    table.cell(tb, 0, 0, "TWI ORB", text_color = color.white, text_size = size.small)
+    table.cell(tb, 1, 0, stTxt, text_color = color.yellow, text_size = size.small)
+    table.cell(tb, 0, 1, trendTF + " trend", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 1, 1, trTxt, text_color = htfTrend == 1 ? color.lime : htfTrend == -1 ? color.red : color.gray, text_size = size.tiny)
+    table.cell(tb, 0, 2, "Breaks / filled", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 1, 2, str.tostring(nBreaks) + " / " + str.tostring(nFilled), text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 0, 3, "Trades (W)", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 1, 3, str.tostring(nTrades) + " (" + str.tostring(nWins) + ")", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 0, 4, "Win rate", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 1, 4, nTrades > 0 ? str.tostring(100.0 * nWins / nTrades, "#.#") + "%" : "-", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 0, 5, "Total R", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 1, 5, str.tostring(sumR, "#.##") + "R", text_color = sumR >= 0 ? color.lime : color.red, text_size = size.tiny)
+    table.cell(tb, 0, 6, "PF (in R)", text_color = color.white, text_size = size.tiny)
+    table.cell(tb, 1, 6, grossL > 0 ? str.tostring(grossW / grossL, "#.##") : "-", text_color = color.white, text_size = size.tiny)

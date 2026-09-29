@@ -1,0 +1,550 @@
+//@version=6
+// TWI OB FVG IDM (2026-09-24) - one simple SMC map, per Adam: "marks out order blocks and FVG with inducement liquidity grabs on order blocks".
+// ORDER BLOCK (strong only): the last opposite candle right before a displacement that leaves an FVG (Adam's rule: strong OBs have the FVG after them).
+// FVG: 3-candle gap (bull: low > high two bars back). Box removed once filled.
+// INDUCEMENT (IDM): the latest small swing that forms after the OB, between price and the OB = liquidity resting in front of the zone.
+// SIGNAL "OB + IDM": price sweeps the IDM and taps the OB (same bar counts). An OB tapped WITHOUT the IDM grab is marked used, no signal.
+// CONFIRMATION: after a tap, the next N candles are watched for a harami or engulfing candle inside the OB (Adam: "bullish harami").
+// OB removed when price closes (or wicks, optional) through its far side. Confirmed bars only - no repaint.
+// RESEARCH GRID (v5): each signal also scored at 1/1.5/2/3R, split by filters: active session (UTC hours), 1H trend agreement,
+//   strong OB (displacement FVG >= x ATR), Adam's big-candles rule (>= N candles with body >= x ATR right after the OB), and session+big. Used to decide which filters earn a place as defaults.
+// STRUCTURE (v6, from the Hamada Fx H1 reel Adam shared): swing BOS / CHoCH labels; after a CHoCH, the first BOS in the new
+//   direction creates a SUPPLY / DEMAND zone = the last opposite candle at the origin of that move. Tap + harami/engulf = SUPPLY/DEMAND check,
+//   scored as its own scorecard row. Built for H1 but works on any timeframe.
+// SCORECARD (v2): every signal is scored as a trade: entry = close of the signal candle, stop = beyond the OB's far edge + buffer,
+//   target = entry + R x risk (default 1.5R). Conservative OHLC: if a bar touches both stop and target it counts as a LOSS;
+//   unresolved after N bars = closed at that bar's close. Three buckets: OB + IDM tap / confirmation + IDM / confirmation without IDM.
+indicator("TWI OB FVG IDM", overlay = true, max_bars_back = 500, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+maxOB    = input.int(6, "Order blocks kept per side", minval = 1, maxval = 30)
+obLook   = input.int(5, "OB search bars before the displacement", minval = 1, maxval = 20)
+idmLen   = input.int(2, "Inducement swing size (bars each side)", minval = 1, maxval = 5)
+invMode  = input.string("Close", "OB invalidated by", options = ["Close", "Wick"])
+showFVG  = input.bool(true, "Show FVGs")
+fvgKeep  = input.int(8, "FVGs kept per side", minval = 1, maxval = 30)
+showUsed = input.bool(false, "Keep used (tapped) OBs on chart")
+confBars = input.int(3, "Confirmation candle window after the tap (bars)", minval = 0, maxval = 10)
+useHar   = input.bool(true, "Confirmation: harami")
+useEng   = input.bool(true, "Confirmation: engulfing")
+
+grpC = "Colours"
+cBullOB  = input.color(color.new(color.teal, 78),   "Bullish OB", group = grpC)
+cBearOB  = input.color(color.new(color.red, 78),    "Bearish OB", group = grpC)
+cBullFVG = input.color(color.new(color.lime, 88),   "Bullish FVG", group = grpC)
+cBearFVG = input.color(color.new(color.orange, 88), "Bearish FVG", group = grpC)
+cIDM     = input.color(color.new(color.yellow, 0),  "Inducement", group = grpC)
+cUsed    = color.new(color.gray, 88)
+
+grpS = "Scorecard"
+showScore = input.bool(true, "Show win/loss scorecard", group = grpS)
+scoreRR   = input.float(1.5, "Target (R multiple)", minval = 0.5, step = 0.25, group = grpS)
+stopBuf   = input.float(10.0, "Stop buffer beyond the OB (% of OB height)", minval = 0, step = 5, group = grpS)
+maxHold   = input.int(288, "Close unresolved trades after N bars", minval = 10, group = grpS)
+showMarks = input.bool(true, "Mark each scored result on the chart", group = grpS)
+scorePos  = input.string("Bottom right", "Scorecard position", options = ["Top right", "Bottom right", "Bottom left", "Top left"], group = grpS)
+
+grpM = "Market structure (BOS / CHoCH / supply-demand)"
+showStruct = input.bool(true, "Show BOS / CHoCH", group = grpM)
+showZones  = input.bool(true, "Show supply / demand zones + signals", group = grpM)
+swingM     = input.int(5, "Structure swing size (bars each side)", minval = 2, maxval = 20, group = grpM)
+zoneMode   = input.string("CHoCH", "Zone created on", options = ["CHoCH", "First BOS after CHoCH"], group = grpM,
+                          tooltip = "CHoCH = zone drawn the moment structure flips (Trading Chart reel). First BOS after CHoCH = wait for confirmation of the new trend (Hamada Fx reel).")
+zonesKeep  = input.int(3, "Zones kept per side", minval = 1, maxval = 10, group = grpM)
+cSupply    = input.color(color.new(color.blue, 75), "Supply zone", group = grpM)
+cDemand    = input.color(color.new(color.green, 75), "Demand zone", group = grpM)
+
+grpX = "Research grid"
+showRes  = input.bool(true, "Show research grid", group = grpX)
+resPos   = input.string("Top right", "Research grid position", options = ["Top right", "Bottom right", "Bottom left", "Top left"], group = grpX)
+sessFrom = input.int(7, "Active session start (UTC hour)", minval = 0, maxval = 23, group = grpX)
+sessTo   = input.int(17, "Active session end (UTC hour)", minval = 1, maxval = 24, group = grpX)
+trendTF  = input.timeframe("60", "Trend timeframe", group = grpX)
+strongK  = input.float(0.5, "Strong OB: FVG gap >= x ATR", minval = 0.05, step = 0.05, group = grpX)
+bigK     = input.float(0.8, "Big candle: body >= x ATR", minval = 0.1, step = 0.1, group = grpX)
+bigMin   = input.int(2, "Big candles needed right after the OB", minval = 1, maxval = 5, group = grpX)
+
+type OB
+    box   bx
+    float top
+    float bot
+    bool  bull
+    int   bar
+    float idm
+    int   idmBar
+    line  idmLn
+    bool  idmSwept = false
+    int   tapBar   = na
+    bool  tapIDM   = false
+    float gapAtr   = 0.0
+    int   bigCount = 0
+
+type Trade
+    bool  bull
+    float entry
+    float sl
+    float tp
+    int   cat
+    int   bar0
+
+// research trade: one signal, scored at 1R / 1.5R / 2R / 3R, tagged with the filters it passes
+type RTrade
+    bool  bull
+    float entry
+    float risk
+    int   cat
+    int   bar0
+    bool  fSess
+    bool  fTrend
+    bool  fStrong
+    bool  fBig
+    array<float> res
+
+type FVG
+    box   bx
+    float top
+    float bot
+
+var bullOBs  = array.new<OB>()
+var bearOBs  = array.new<OB>()
+var bullFVGs = array.new<FVG>()
+var bearFVGs = array.new<FVG>()
+var int lastBullOBBar = na
+var trades = array.new<Trade>()
+var sN = array.new_float(4, 0.0)   // per bucket: trades
+var sW = array.new_float(4, 0.0)   //             wins
+var sR = array.new_float(4, 0.0)   //             total R
+// market structure state
+var supplyZ = array.new<OB>()
+var demandZ = array.new<OB>()
+var int   mTrend = 0
+var float mSH = na
+var int   mSHbar = na
+var bool  mSHbroken = true
+var float mSL = na
+var int   mSLbar = na
+var bool  mSLbroken = true
+var bool  awaitBOS = false
+var int lastBearOBBar = na
+var rtrades = array.new<RTrade>()
+var RM = array.from(1.0, 1.5, 2.0, 3.0)
+var gN = array.new_float(72, 0.0)   // [bucket 3][filter 6][target 4]
+var gW = array.new_float(72, 0.0)
+var gR = array.new_float(72, 0.0)
+
+// research filters
+atr = ta.atr(14)
+trendCalc() =>
+    tph = ta.pivothigh(high, 3, 3)
+    tpl = ta.pivotlow(low, 3, 3)
+    var float h1 = na
+    var float h0 = na
+    var float l1 = na
+    var float l0 = na
+    if not na(tph)
+        h0 := h1
+        h1 := tph
+    if not na(tpl)
+        l0 := l1
+        l1 := tpl
+    bool up = not na(h0) and not na(l0) and h1 > h0 and l1 > l0
+    bool dn = not na(h0) and not na(l0) and h1 < h0 and l1 < l0
+    up ? 1 : dn ? -1 : 0
+htfTrend = request.security(syminfo.tickerid, trendTF, trendCalc()[1], lookahead = barmerge.lookahead_on)
+utcH = hour(time, "UTC")
+inSess = sessFrom < sessTo ? (utcH >= sessFrom and utcH < sessTo) : (utcH >= sessFrom or utcH < sessTo)
+
+// structure swings (BOS / CHoCH)
+mph = ta.pivothigh(high, swingM, swingM)
+mpl = ta.pivotlow(low, swingM, swingM)
+
+// minor swings used as inducement
+ipl = ta.pivotlow(low, idmLen, idmLen)
+iph = ta.pivothigh(high, idmLen, idmLen)
+
+// open a scored trade from a signal candle's close; stop beyond the OB far edge
+openTrade(OB o, int cat) =>
+    buf = (o.top - o.bot) * stopBuf / 100.0
+    sl = o.bull ? o.bot - buf : o.top + buf
+    risk = o.bull ? close - sl : sl - close
+    if risk > 0
+        array.push(trades, Trade.new(o.bull, close, sl, o.bull ? close + scoreRR * risk : close - scoreRR * risk, cat, bar_index))
+        if cat < 3
+            array.push(rtrades, RTrade.new(o.bull, close, risk, cat, bar_index, inSess, o.bull ? htfTrend == 1 : htfTrend == -1, o.gapAtr >= strongK, o.bigCount >= bigMin, array.new_float(4, na)))
+    0
+
+recordG(RTrade t, int k, float r) =>
+    for f = 0 to 5
+        ok = f == 0 or (f == 1 and t.fSess) or (f == 2 and t.fTrend) or (f == 3 and t.fStrong) or (f == 4 and t.fBig) or (f == 5 and t.fSess and t.fBig)
+        if ok
+            idx = (t.cat * 6 + f) * 4 + k
+            array.set(gN, idx, array.get(gN, idx) + 1)
+            if r > 0
+                array.set(gW, idx, array.get(gW, idx) + 1)
+            array.set(gR, idx, array.get(gR, idx) + r)
+    0
+
+stepRTrades() =>
+    if array.size(rtrades) > 0
+        for i = array.size(rtrades) - 1 to 0
+            t = array.get(rtrades, i)
+            sl = t.bull ? t.entry - t.risk : t.entry + t.risk
+            hitSL = t.bull ? low <= sl : high >= sl
+            timeUp = bar_index - t.bar0 >= maxHold
+            bool stillOpen = false
+            for k = 0 to 3
+                if na(array.get(t.res, k))
+                    tp = t.bull ? t.entry + array.get(RM, k) * t.risk : t.entry - array.get(RM, k) * t.risk
+                    hitTP = t.bull ? high >= tp : low <= tp
+                    float r = na
+                    if hitSL
+                        r := -1.0
+                    else if hitTP
+                        r := array.get(RM, k)
+                    else if timeUp
+                        r := (t.bull ? close - t.entry : t.entry - close) / t.risk
+                    if na(r)
+                        stillOpen := true
+                    else
+                        array.set(t.res, k, r)
+                        recordG(t, k, r)
+            if not stillOpen
+                array.remove(rtrades, i)
+    0
+
+scoreResult(Trade t, float r) =>
+    array.set(sN, t.cat, array.get(sN, t.cat) + 1)
+    if r > 0
+        array.set(sW, t.cat, array.get(sW, t.cat) + 1)
+    array.set(sR, t.cat, array.get(sR, t.cat) + r)
+    if showMarks
+        label.new(bar_index, r > 0 ? t.tp : t.sl, (r > 0 ? "✔ +" : "✖ ") + str.tostring(r, "#.##") + "R",
+                  style = label.style_none, textcolor = r > 0 ? color.lime : color.red, size = size.tiny)
+    0
+
+stepTrades() =>
+    if array.size(trades) > 0
+        for i = array.size(trades) - 1 to 0
+            t = array.get(trades, i)
+            hitSL = t.bull ? low <= t.sl : high >= t.sl
+            hitTP = t.bull ? high >= t.tp : low <= t.tp
+            risk = math.abs(t.entry - t.sl)
+            if hitSL
+                scoreResult(t, -1.0)
+                array.remove(trades, i)
+            else if hitTP
+                scoreResult(t, scoreRR)
+                array.remove(trades, i)
+            else if bar_index - t.bar0 >= maxHold
+                scoreResult(t, (t.bull ? close - t.entry : t.entry - close) / risk)
+                array.remove(trades, i)
+    0
+
+killOB(OB o) =>
+    box.delete(o.bx)
+    line.delete(o.idmLn)
+    0
+
+retireOB(OB o) =>
+    if showUsed
+        box.set_right(o.bx, bar_index)
+        box.set_bgcolor(o.bx, cUsed)
+        box.set_border_color(o.bx, color.new(color.gray, 70))
+        line.set_x2(o.idmLn, bar_index)
+    else
+        killOB(o)
+    0
+
+// one bar of life for every OB on one side; returns nothing, mutates the array
+stepOBs(array<OB> obs, bool bull) =>
+    if array.size(obs) > 0
+        for i = array.size(obs) - 1 to 0
+            o = array.get(obs, i)
+            box.set_right(o.bx, bar_index + 3)
+            // invalidation: price goes through the far side
+            broken = bull ? (invMode == "Close" ? close < o.bot : low < o.bot) : (invMode == "Close" ? close > o.top : high > o.top)
+            if broken
+                killOB(o)
+                array.remove(obs, i)
+                continue
+            // inducement: latest minor swing formed after the OB, sitting in front of it
+            pv = bull ? ipl : iph
+            pvBar = bar_index - idmLen
+            if not na(pv) and pvBar > o.bar and (bull ? pv > o.top : pv < o.bot) and not o.idmSwept
+                o.idm := pv
+                o.idmBar := pvBar
+                line.delete(o.idmLn)
+                o.idmLn := line.new(pvBar, pv, bar_index, pv, color = cIDM, style = line.style_dotted)
+            if not na(o.idm) and not o.idmSwept
+                line.set_x2(o.idmLn, bar_index)
+                if bull ? low < o.idm : high > o.idm
+                    o.idmSwept := true
+                    label.new(bar_index, o.idm, "IDM", style = label.style_none, textcolor = cIDM, size = size.tiny,
+                              tooltip = "Inducement liquidity grabbed at " + str.tostring(o.idm, format.mintick))
+            // after the tap: watch a few candles for the confirmation candle, then retire the OB
+            if not na(o.tapBar)
+                if bar_index > o.tapBar
+                    harami = bull ? (close[1] < open[1] and close > open and open >= close[1] and close <= open[1]) : (close[1] > open[1] and close < open and open <= close[1] and close >= open[1])
+                    engulf = bull ? (close[1] < open[1] and close > open and open <= close[1] and close >= open[1]) : (close[1] > open[1] and close < open and open >= close[1] and close <= open[1])
+                    inZone = bull ? low <= o.top : high >= o.bot
+                    hit = inZone and ((useHar and harami) or (useEng and engulf))
+                    if hit
+                        nm = harami and useHar ? "Harami" : "Engulf"
+                        label.new(bar_index, bull ? low : high, nm + (o.tapIDM ? " + IDM" : "") + " ✓", style = bull ? label.style_label_up : label.style_label_down,
+                                  color = bull ? color.new(color.lime, 0) : color.new(color.fuchsia, 0), textcolor = color.black, size = size.small,
+                                  tooltip = (bull ? "Bullish " : "Bearish ") + nm + " confirmation inside the OB" + (o.tapIDM ? " after an inducement grab" : ""))
+                        alert("TWI OB FVG IDM: " + (bull ? "BULLISH " : "BEARISH ") + nm + " confirmation at the OB" + (o.tapIDM ? " (after IDM grab)" : "") + " - " + syminfo.ticker,
+                              alert.freq_once_per_bar_close)
+                        openTrade(o, o.tapIDM ? 1 : 2)
+                    if hit or bar_index - o.tapBar >= confBars
+                        retireOB(o)
+                        array.remove(obs, i)
+                continue
+            // tap of the OB
+            tapped = bull ? low <= o.top : high >= o.bot
+            if tapped
+                o.tapBar := bar_index
+                o.tapIDM := o.idmSwept
+                box.set_bgcolor(o.bx, bull ? color.new(color.teal, 60) : color.new(color.red, 60))
+                if o.idmSwept
+                    label.new(bar_index, bull ? low : high, "OB + IDM", style = bull ? label.style_label_up : label.style_label_down,
+                              color = bull ? color.new(color.teal, 10) : color.new(color.red, 10), textcolor = color.white, size = size.small,
+                              tooltip = (bull ? "Bullish" : "Bearish") + " OB " + str.tostring(o.bot, format.mintick) + " - " + str.tostring(o.top, format.mintick) +
+                                        "\nInducement grabbed at " + str.tostring(o.idm, format.mintick))
+                    alert("TWI OB FVG IDM: " + (bull ? "BULLISH" : "BEARISH") + " OB tapped after an inducement grab - " + syminfo.ticker +
+                          "  OB " + str.tostring(o.bot, format.mintick) + "-" + str.tostring(o.top, format.mintick), alert.freq_once_per_bar_close)
+                    openTrade(o, 0)
+                if confBars == 0
+                    retireOB(o)
+                    array.remove(obs, i)
+    0
+
+// supply / demand zones from structure: invalidation, tap, confirmation candle -> scored as bucket 3
+stepZones(array<OB> zs, bool bull) =>
+    if array.size(zs) > 0
+        for i = array.size(zs) - 1 to 0
+            z = array.get(zs, i)
+            box.set_right(z.bx, bar_index + 3)
+            if bull ? close < z.bot : close > z.top
+                box.delete(z.bx)
+                array.remove(zs, i)
+                continue
+            if not na(z.tapBar)
+                if bar_index > z.tapBar
+                    harami = bull ? (close[1] < open[1] and close > open and open >= close[1] and close <= open[1]) : (close[1] > open[1] and close < open and open <= close[1] and close >= open[1])
+                    engulf = bull ? (close[1] < open[1] and close > open and open <= close[1] and close >= open[1]) : (close[1] > open[1] and close < open and open >= close[1] and close <= open[1])
+                    inZone = bull ? low <= z.top : high >= z.bot
+                    hit = inZone and ((useHar and harami) or (useEng and engulf))
+                    if hit
+                        label.new(bar_index, bull ? low : high, (bull ? "DEMAND ✓ " : "SUPPLY ✓ ") + (harami and useHar ? "harami" : "engulf"),
+                                  style = bull ? label.style_label_up : label.style_label_down, color = bull ? color.new(color.green, 0) : color.new(color.blue, 0),
+                                  textcolor = color.white, size = size.small,
+                                  tooltip = (bull ? "Demand" : "Supply") + " zone " + str.tostring(z.bot, format.mintick) + " - " + str.tostring(z.top, format.mintick) + " tapped and confirmed")
+                        alert("TWI OB FVG IDM: " + (bull ? "DEMAND" : "SUPPLY") + " zone confirmed - " + syminfo.ticker + "  zone " + str.tostring(z.bot, format.mintick) + "-" + str.tostring(z.top, format.mintick),
+                              alert.freq_once_per_bar_close)
+                        openTrade(z, 3)
+                    if hit or bar_index - z.tapBar >= confBars
+                        box.delete(z.bx)
+                        array.remove(zs, i)
+                continue
+            if bull ? low <= z.top : high >= z.bot
+                z.tapBar := bar_index
+                box.set_bgcolor(z.bx, bull ? color.new(color.green, 55) : color.new(color.blue, 55))
+    0
+
+stepFVGs(array<FVG> fv, bool bull) =>
+    if array.size(fv) > 0
+        for i = array.size(fv) - 1 to 0
+            f = array.get(fv, i)
+            filled = bull ? low <= f.bot : high >= f.top
+            if filled
+                box.delete(f.bx)
+                array.remove(fv, i)
+            else
+                box.set_right(f.bx, bar_index + 3)
+    0
+
+newOB(array<OB> obs, bool bull, int off, float gapAtr) =>
+    o = OB.new(na, high[off], low[off], bull, bar_index - off, na, na, na)
+    o.gapAtr := gapAtr
+    // Adam's rule: the best OBs have multiple big candles right after them (counted over up to 3 candles after the OB)
+    int cnt = 0
+    for j = math.max(off - 3, 0) to off - 1
+        body = close[j] - open[j]
+        if (bull ? body : -body) >= bigK * atr
+            cnt += 1
+    o.bigCount := cnt
+    o.bx := box.new(bar_index - off, high[off], bar_index + 3, low[off], border_color = bull ? color.new(color.teal, 30) : color.new(color.red, 30),
+                    bgcolor = bull ? cBullOB : cBearOB, text = bull ? "Bull OB" : "Bear OB", text_size = size.tiny,
+                    text_color = bull ? color.teal : color.red, text_halign = text.align_left)
+    array.push(obs, o)
+    if array.size(obs) > maxOB
+        killOB(array.shift(obs))
+    0
+
+newFVG(array<FVG> fv, bool bull) =>
+    t = bull ? low : low[2]
+    b = bull ? high[2] : high
+    f = FVG.new(box.new(bar_index - 2, t, bar_index + 3, b, border_color = na, bgcolor = bull ? cBullFVG : cBearFVG,
+                        text = "FVG", text_size = size.tiny, text_color = bull ? color.new(color.lime, 30) : color.new(color.orange, 30)), t, b)
+    array.push(fv, f)
+    if array.size(fv) > fvgKeep
+        box.delete(array.shift(fv).bx)
+    0
+
+if barstate.isconfirmed
+    // score open trades first, so a trade is never resolved on the bar that opened it
+    stepTrades()
+    stepRTrades()
+    // existing zones first, so a zone is never tapped by the bar that created it
+    stepOBs(bullOBs, true)
+    stepOBs(bearOBs, false)
+    if showFVG
+        stepFVGs(bullFVGs, true)
+        stepFVGs(bearFVGs, false)
+    if showZones
+        stepZones(demandZ, true)
+        stepZones(supplyZ, false)
+
+    // ---- market structure: swings, BOS / CHoCH, zone creation ----
+    if not na(mph)
+        mSH := mph, mSHbar := bar_index - swingM, mSHbroken := false
+    if not na(mpl)
+        mSL := mpl, mSLbar := bar_index - swingM, mSLbroken := false
+    upBrk = not na(mSH) and not mSHbroken and close > mSH
+    dnBrk = not na(mSL) and not mSLbroken and close < mSL
+    if upBrk and not dnBrk
+        isCh = mTrend == -1
+        if showStruct
+            line.new(mSHbar, mSH, bar_index, mSH, color = color.new(color.gray, 20), style = line.style_dashed)
+            label.new(int(math.round((mSHbar + bar_index) / 2)), mSH, isCh ? "CHoCH" : "BOS", style = label.style_none, textcolor = isCh ? color.orange : color.gray, size = size.tiny)
+        mSHbroken := true
+        if showZones and not na(mSLbar) and (zoneMode == "CHoCH" ? isCh : (not isCh and mTrend == 1 and awaitBOS))
+            // demand = last bearish candle at the origin (lowest low) of the move since the last swing low
+            span = math.min(bar_index - mSLbar + swingM, 200)
+            extOff = 0
+            for i = 0 to span
+                if low[i] < low[extOff]
+                    extOff := i
+            zOff = -1
+            for i = extOff to extOff + 10
+                if close[i] < open[i]
+                    zOff := i
+                    break
+            if zOff >= 0
+                z = OB.new(na, high[zOff], math.min(low[zOff], low[extOff]), true, bar_index - zOff, na, na, na)
+                z.bx := box.new(bar_index - zOff, z.top, bar_index + 3, z.bot, border_color = color.new(color.green, 30), bgcolor = cDemand,
+                                text = "Demand Zone " + str.tostring(z.bot, format.mintick) + "-" + str.tostring(z.top, format.mintick), text_size = size.tiny, text_color = color.green)
+                array.push(demandZ, z)
+                if array.size(demandZ) > zonesKeep
+                    box.delete(array.shift(demandZ).bx)
+            awaitBOS := false
+        if isCh or mTrend == 0
+            awaitBOS := isCh
+            mTrend := 1
+    if dnBrk and not upBrk
+        isCh = mTrend == 1
+        if showStruct
+            line.new(mSLbar, mSL, bar_index, mSL, color = color.new(color.gray, 20), style = line.style_dashed)
+            label.new(int(math.round((mSLbar + bar_index) / 2)), mSL, isCh ? "CHoCH" : "BOS", style = label.style_none, textcolor = isCh ? color.orange : color.gray, size = size.tiny)
+        mSLbroken := true
+        if showZones and not na(mSHbar) and (zoneMode == "CHoCH" ? isCh : (not isCh and mTrend == -1 and awaitBOS))
+            // supply = last bullish candle at the origin (highest high) of the move since the last swing high
+            span = math.min(bar_index - mSHbar + swingM, 200)
+            extOff = 0
+            for i = 0 to span
+                if high[i] > high[extOff]
+                    extOff := i
+            zOff = -1
+            for i = extOff to extOff + 10
+                if close[i] > open[i]
+                    zOff := i
+                    break
+            if zOff >= 0
+                z = OB.new(na, math.max(high[zOff], high[extOff]), low[zOff], false, bar_index - zOff, na, na, na)
+                z.bx := box.new(bar_index - zOff, z.top, bar_index + 3, z.bot, border_color = color.new(color.blue, 30), bgcolor = cSupply,
+                                text = "Supply Zone " + str.tostring(z.bot, format.mintick) + "-" + str.tostring(z.top, format.mintick), text_size = size.tiny, text_color = color.blue)
+                array.push(supplyZ, z)
+                if array.size(supplyZ) > zonesKeep
+                    box.delete(array.shift(supplyZ).bx)
+            awaitBOS := false
+        if isCh or mTrend == 0
+            awaitBOS := isCh
+            mTrend := -1
+
+    bullGap = bar_index > 3 and low > high[2] and close[1] > open[1]
+    bearGap = bar_index > 3 and high < low[2] and close[1] < open[1]
+
+    if bullGap
+        if showFVG
+            newFVG(bullFVGs, true)
+        // strong bullish OB = last bearish candle at/before the displacement candle
+        int off = na
+        for i = 2 to 1 + obLook
+            if close[i] < open[i]
+                off := i
+                break
+        if not na(off) and (na(lastBullOBBar) or bar_index - off != lastBullOBBar)
+            lastBullOBBar := bar_index - off
+            newOB(bullOBs, true, off, atr > 0 ? (low - high[2]) / atr : 0.0)
+
+    if bearGap
+        if showFVG
+            newFVG(bearFVGs, false)
+        int off = na
+        for i = 2 to 1 + obLook
+            if close[i] > open[i]
+                off := i
+                break
+        if not na(off) and (na(lastBearOBBar) or bar_index - off != lastBearOBBar)
+            lastBearOBBar := bar_index - off
+            newOB(bearOBs, false, off, atr > 0 ? (low[2] - high) / atr : 0.0)
+
+// ---------- scorecard ----------
+sPos = scorePos == "Top right" ? position.top_right : scorePos == "Bottom right" ? position.bottom_right : scorePos == "Bottom left" ? position.bottom_left : position.top_left
+var table sc = table.new(sPos, 5, 7, bgcolor = color.new(color.black, 15), border_width = 1)
+rowTxt(float n, float w, float r) =>
+    [n > 0 ? str.tostring(n, "#") : "0", n > 0 ? str.tostring(100 * w / n, "#") + "%" : "-", str.tostring(r, "+#.##;-#.##") + "R", n > 0 ? str.tostring(r / n, "+#.##;-#.##") : "-"]
+if barstate.islast and showScore
+    table.cell(sc, 0, 0, "SCORE @ " + str.tostring(scoreRR, "#.##") + "R", text_color = color.yellow, text_size = size.tiny)
+    table.cell(sc, 1, 0, "Trades", text_color = color.white, text_size = size.tiny)
+    table.cell(sc, 2, 0, "Win %", text_color = color.white, text_size = size.tiny)
+    table.cell(sc, 3, 0, "Total", text_color = color.white, text_size = size.tiny)
+    table.cell(sc, 4, 0, "Avg R", text_color = color.white, text_size = size.tiny)
+    names = array.from("OB + IDM", "Confirm + IDM ✓", "Confirm ✓ (no IDM)", "Supply/Demand ✓")
+    for k = 0 to 3
+        [a, b, c, d] = rowTxt(array.get(sN, k), array.get(sW, k), array.get(sR, k))
+        col = array.get(sR, k) > 0 ? color.lime : array.get(sR, k) < 0 ? color.red : color.gray
+        table.cell(sc, 0, k + 1, array.get(names, k), text_color = color.white, text_size = size.tiny)
+        table.cell(sc, 1, k + 1, a, text_color = color.white, text_size = size.tiny)
+        table.cell(sc, 2, k + 1, b, text_color = color.white, text_size = size.tiny)
+        table.cell(sc, 3, k + 1, c, text_color = col, text_size = size.tiny)
+        table.cell(sc, 4, k + 1, d, text_color = col, text_size = size.tiny)
+    [a, b, c, d] = rowTxt(array.sum(sN), array.sum(sW), array.sum(sR))
+    table.cell(sc, 0, 5, "ALL", text_color = color.yellow, text_size = size.tiny)
+    table.cell(sc, 1, 5, a, text_color = color.white, text_size = size.tiny)
+    table.cell(sc, 2, 5, b, text_color = color.white, text_size = size.tiny)
+    table.cell(sc, 3, 5, c, text_color = array.sum(sR) >= 0 ? color.lime : color.red, text_size = size.tiny)
+    table.cell(sc, 4, 5, d, text_color = array.sum(sR) >= 0 ? color.lime : color.red, text_size = size.tiny)
+    table.cell(sc, 0, 6, "entry = signal close, stop past OB, SL-first if both hit", text_color = color.gray, text_size = size.tiny)
+
+// ---------- research grid: total R (trades) per bucket x filter x target ----------
+gPos = resPos == "Top right" ? position.top_right : resPos == "Bottom right" ? position.bottom_right : resPos == "Bottom left" ? position.bottom_left : position.top_left
+var table rg = table.new(gPos, 5, 19, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast and showRes
+    table.cell(rg, 0, 0, "RESEARCH", text_color = color.yellow, text_size = size.tiny)
+    tn = array.from("1R", "1.5R", "2R", "3R")
+    for k = 0 to 3
+        table.cell(rg, k + 1, 0, array.get(tn, k), text_color = color.white, text_size = size.tiny)
+    bn = array.from("TAP", "CONF+IDM", "CONF")
+    fn = array.from("all", "session", "trend", "strong gap", "big candles", "session+big")
+    for c = 0 to 2
+        for f = 0 to 5
+            row = 1 + c * 6 + f
+            table.cell(rg, 0, row, array.get(bn, c) + " " + array.get(fn, f), text_color = color.white, text_size = size.tiny)
+            for k = 0 to 3
+                idx = (c * 6 + f) * 4 + k
+                n = array.get(gN, idx)
+                r = array.get(gR, idx)
+                table.cell(rg, k + 1, row, n > 0 ? str.tostring(r, "+#.#;-#.#") + " (" + str.tostring(n, "#") + ")" : "-",
+                           text_color = n == 0 ? color.gray : r > 0 ? color.lime : color.red, text_size = size.tiny)
+
