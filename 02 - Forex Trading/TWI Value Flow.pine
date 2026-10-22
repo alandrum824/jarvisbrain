@@ -1,0 +1,338 @@
+//@version=6
+// TWI Value Flow - session volume profiles, value migration, OTE pullback zone, disciplined signals.
+// Profile: each day's volume (tick volume on forex) spread over price rows -> POC (busiest price) and the 70% value area (VAH / VAL).
+// Migration: a day whose POC and value area sit below the prior day's = value moving DOWN (sell rallies); above = UP (buy dips); else balance.
+// OTE ("pullback zone"): 0.705-0.886 retracement of the last swing leg (swing = highest/lowest of N candles each side). ★ when it overlaps the prior value area.
+// Signal: with migration, price wicks into the prior VAL/POC (VAH/POC for buys) or the OTE zone and the candle closes back out (closed bars only).
+// Best-move guard: max N signals per day, and none once the day's range has already reached x of the average daily range.
+indicator("TWI Value Flow", shorttitle = "TWI-VF", overlay = true, max_boxes_count = 200, max_lines_count = 100, max_labels_count = 100)
+
+// ───────────────────────── Inputs ─────────────────────────
+grpP = "Volume profile"
+rows     = input.int(40, "Price rows per profile", minval = 10, maxval = 80, group = grpP)
+vaPct    = input.float(70, "Value area %", minval = 50, maxval = 90, group = grpP)
+showHist = input.bool(true, "Show today's profile histogram", group = grpP)
+histW    = input.int(30, "Histogram width (bars)", minval = 5, maxval = 100, group = grpP)
+keepDays = input.int(5, "Past value areas shown (days)", minval = 1, maxval = 20, group = grpP)
+
+grpO = "OTE zone"
+showOTE = input.bool(true, "Show OTE zone", group = grpO)
+oteLen  = input.int(15, "Swing length (candles each side)", minval = 2, maxval = 50, group = grpO)
+oteA    = input.float(0.705, "OTE from", minval = 0.5, maxval = 1.0, step = 0.001, group = grpO)
+oteB    = input.float(0.886, "OTE to", minval = 0.5, maxval = 1.0, step = 0.001, group = grpO)
+showCounter = input.bool(false, "Also show pullback zones against the trend", group = grpO)
+
+grpS = "Signals + discipline"
+showSig = input.bool(true, "Show BUY / SELL signals", group = grpS)
+maxSig  = input.int(2, "Max signals per day", minval = 1, maxval = 10, group = grpS)
+adrMult = input.float(0.9, "Best move gone: day's range >= x average daily range", minval = 0.3, step = 0.05, group = grpS)
+coolBars = input.int(3, "Min bars between signals", minval = 1, maxval = 50, group = grpS)
+
+grpT = "Panel"
+showPanel = input.bool(true, "Show panel", group = grpT)
+panelPos  = input.string("Bottom right", "Panel position", options = ["Bottom right", "Top right", "Middle right", "Top left", "Bottom left", "Middle left"], group = grpT)
+tblSize   = input.string("Small", "Panel text size", options = ["Tiny", "Small", "Normal"], group = grpT)
+
+bullCol = color.new(#089981, 0)
+bearCol = color.new(#f23645, 0)
+vaCol   = color.new(#2962ff, 0)
+outCol  = color.new(#c9a227, 0)
+pocCol  = color.new(#ff5252, 0)
+weakCol = color.new(#787b86, 0)
+textCol = color.new(#d1d4dc, 0)
+noCol   = color.new(color.black, 100)
+
+intraday = timeframe.isintraday
+atrV = ta.atr(14)
+dAtr = request.security(syminfo.tickerid, "D", ta.atr(14)[1], lookahead = barmerge.lookahead_on)
+
+// ───────────────────────── Profile math ─────────────────────────
+// spreads each bar's volume evenly over the rows it covers; value area grows from the POC toward the busier neighbour
+calcProfile(array<float> hs, array<float> ls, array<float> vs) =>
+    top = array.max(hs)
+    bot = array.min(ls)
+    step = math.max((top - bot) / rows, syminfo.mintick)
+    bins = array.new<float>(rows, 0.0)
+    for i = 0 to array.size(hs) - 1
+        b0 = math.max(0, math.min(rows - 1, math.floor((array.get(ls, i) - bot) / step)))
+        b1 = math.max(0, math.min(rows - 1, math.floor((array.get(hs, i) - bot) / step)))
+        share = array.get(vs, i) / (b1 - b0 + 1)
+        for b = b0 to b1
+            array.set(bins, b, array.get(bins, b) + share)
+    pocI = array.indexof(bins, array.max(bins))
+    total = array.sum(bins)
+    lo = pocI
+    hi = pocI
+    acc = array.get(bins, pocI)
+    while acc < total * vaPct / 100 and (lo > 0 or hi < rows - 1)
+        up = hi < rows - 1 ? array.get(bins, hi + 1) : -1.0
+        dn = lo > 0 ? array.get(bins, lo - 1) : -1.0
+        if up >= dn
+            hi += 1
+            acc += up
+        else
+            lo -= 1
+            acc += dn
+    [bot + (pocI + 0.5) * step, bot + (hi + 1) * step, bot + lo * step, bot, step, lo, hi, bins]
+
+// ───────────────────────── Sessions ─────────────────────────
+newDay = timeframe.change("D")
+var array<float> sH = array.new<float>()
+var array<float> sL = array.new<float>()
+var array<float> sV = array.new<float>()
+var int   curStart = na
+var float tdh = na
+var float tdl = na
+var int   sigCount = 0
+var int   lastSigBar = na
+
+// last completed day (p*), migration vs the day before it
+var float pPoc = na
+var float pVah = na
+var float pVal = na
+var int   pStart = na
+var int   pEnd = na
+var int   migDir = 0
+var int   migStreak = 0
+var array<box>  hBoxes = array.new<box>()
+var array<line> hPocs  = array.new<line>()
+
+if newDay and intraday
+    if array.size(sH) > 0
+        [dPoc, dVah, dVal, dBot, dStep, dLo, dHi, dBins] = calcProfile(sH, sL, sV)
+        mig = na(pPoc) ? 0 : dPoc > pPoc and dVal > pVal ? 1 : dPoc < pPoc and dVah < pVah ? -1 : 0
+        migStreak := mig != 0 and mig == migDir ? migStreak + 1 : mig != 0 ? 1 : 0
+        migDir := mig
+        pPoc := dPoc
+        pVah := dVah
+        pVal := dVal
+        pStart := curStart
+        pEnd := bar_index - 1
+        // the staircase: one value-area box + POC line per finished day
+        hCol = mig == 1 ? bullCol : mig == -1 ? bearCol : weakCol
+        array.push(hBoxes, box.new(pStart, pVah, pEnd, pVal, border_color = color.new(textCol, 60), border_width = 1, bgcolor = color.new(hCol, 85)))
+        array.push(hPocs, line.new(pStart, pPoc, pEnd, pPoc, color = color.new(pocCol, 20), width = 1))
+        if array.size(hBoxes) > keepDays
+            box.delete(array.shift(hBoxes))
+            line.delete(array.shift(hPocs))
+    array.clear(sH)
+    array.clear(sL)
+    array.clear(sV)
+    curStart := bar_index
+    tdh := high
+    tdl := low
+    sigCount := 0
+else
+    tdh := math.max(nz(tdh, high), high)
+    tdl := math.min(nz(tdl, low), low)
+array.push(sH, high)
+array.push(sL, low)
+array.push(sV, nz(volume))
+
+// ───────────────────────── OTE zone ─────────────────────────
+ph = ta.pivothigh(high, oteLen, oteLen)
+pl = ta.pivotlow(low, oteLen, oteLen)
+var float swH = na
+var int   swHx = na
+var float swL = na
+var int   swLx = na
+var bool  oteLive = false
+if not na(ph)
+    swH := ph
+    swHx := bar_index - oteLen
+    oteLive := true
+if not na(pl)
+    swL := pl
+    swLx := bar_index - oteLen
+    oteLive := true
+legDn = not na(swH) and not na(swL) and swLx > swHx     // high then low = down leg -> sell the retrace up
+rng = nz(swH - swL)
+oteBot = legDn ? swL + oteA * rng : swH - oteB * rng
+oteTop = legDn ? swL + oteB * rng : swH - oteA * rng
+oteDir = legDn ? -1 : 1
+// a close beyond the leg's start kills the zone until the next swing
+if oteLive and ((legDn and close > swH) or (not legDn and close < swL))
+    oteLive := false
+oteOk = oteLive and not na(swH) and not na(swL) and rng > 0
+oteWith = oteOk and oteDir == migDir      // only a leg in the migration direction is tradable
+oteConf = oteWith and not na(pVah) and oteTop >= pVal and oteBot <= pVah   // overlaps prior value area = A+
+
+// ───────────────────────── Signals ─────────────────────────
+hi3 = ta.highest(high, 3)
+lo3 = ta.lowest(low, 3)
+bestGone = not na(dAtr) and dAtr > 0 and (tdh - tdl) >= adrMult * dAtr
+cooled = na(lastSigBar) or bar_index - lastSigBar >= coolBars
+canFire = intraday and barstate.isconfirmed and not bestGone and sigCount < maxSig and cooled
+
+// bear: value migrating down, rally wicks into the prior VAL or prior POC (or the sell OTE), candle closes back below
+sVA  = migDir == -1 and not na(pVal) and ((hi3 >= pVal and close < pVal) or (hi3 >= pPoc and close < pPoc)) and close < open
+sOTE = migDir == -1 and oteOk and oteDir == -1 and hi3 >= oteBot and close < oteBot and close < open
+// bull: mirror (prior VAH or prior POC)
+bVA  = migDir == 1 and not na(pVah) and ((lo3 <= pVah and close > pVah) or (lo3 <= pPoc and close > pPoc)) and close > open
+bOTE = migDir == 1 and oteOk and oteDir == 1 and lo3 <= oteTop and close > oteTop and close > open
+
+sellSig = canFire and (sVA or sOTE)
+buySig  = canFire and (bVA or bOTE)
+var array<label> sigLbls = array.new<label>()
+if sellSig or buySig
+    grade = (sellSig ? (sVA and sOTE) or (sOTE and oteConf) : (bVA and bOTE) or (bOTE and oteConf)) ? " ★" : ""
+    sigCount += 1
+    lastSigBar := bar_index
+    if showSig
+        array.push(sigLbls, label.new(bar_index, sellSig ? high : low, (sellSig ? "SELL" : "BUY") + grade, style = sellSig ? label.style_label_down : label.style_label_up, color = sellSig ? bearCol : bullCol, textcolor = color.white, size = size.tiny))
+        if array.size(sigLbls) > 40
+            label.delete(array.shift(sigLbls))
+
+enteredVA = intraday and barstate.isconfirmed and not na(pVah) and high >= pVal and low <= pVah and not (high[1] >= pVal and low[1] <= pVah)
+
+// ───────────────────────── Drawing (last bar) ─────────────────────────
+var array<box> hist = array.new<box>()
+if barstate.isfirst
+    for i = 0 to rows - 1
+        array.push(hist, box.new(na, na, na, na, border_color = noCol, bgcolor = noCol))
+var line cPoc = line.new(na, na, na, na, color = pocCol, width = 2)
+var line cVah = line.new(na, na, na, na, color = color.new(textCol, 30), width = 1)
+var line cVal = line.new(na, na, na, na, color = color.new(textCol, 30), width = 1)
+// prior day's levels extended right; text ends at the line end so it stays on screen
+var line  xVah = line.new(na, na, na, na, color = color.new(textCol, 40), style = line.style_dashed)
+var line  xPoc = line.new(na, na, na, na, color = color.new(pocCol, 30), style = line.style_dashed)
+var line  xVal = line.new(na, na, na, na, color = color.new(textCol, 40), style = line.style_dashed)
+var label xVahL = label.new(na, na, "", style = label.style_label_lower_right, color = noCol, textcolor = textCol, size = size.tiny)
+var label xPocL = label.new(na, na, "", style = label.style_label_lower_right, color = noCol, textcolor = pocCol, size = size.tiny)
+var label xValL = label.new(na, na, "", style = label.style_label_upper_right, color = noCol, textcolor = textCol, size = size.tiny)
+var box   oteBox = box.new(na, na, na, na, border_color = noCol, bgcolor = noCol, text_size = size.tiny, text_halign = text.align_right)
+
+// one decimal fewer than the tick keeps text short (gold 4119.18)
+pDec = math.max(0, math.round(-math.log10(syminfo.mintick)) - 1)
+fmtP(float p) =>
+    str.tostring(p, pDec == 0 ? "#" : "#." + str.repeat("0", pDec))
+
+float cPocV = na
+float cVahV = na
+float cValV = na
+xR = bar_index + 10
+if barstate.islast and intraday
+    if array.size(sH) > 0
+        [aPoc, aVah, aVal, aBot, aStep, aLo, aHi, aBins] = calcProfile(sH, sL, sV)
+        cPocV := aPoc
+        cVahV := aVah
+        cValV := aVal
+        maxB = array.max(aBins)
+        // never wider than 60% of the session so far, and see-through, so the live candles stay readable
+        wMax = math.max(3, math.min(histW, math.round((bar_index - curStart + 1) * 0.6)))
+        for i = 0 to rows - 1
+            b = array.get(hist, i)
+            w = maxB > 0 ? math.round(array.get(aBins, i) / maxB * wMax) : 0
+            if showHist and w > 0
+                box.set_lefttop(b, curStart, aBot + (i + 1) * aStep)
+                box.set_rightbottom(b, curStart + w, aBot + i * aStep)
+                box.set_bgcolor(b, color.new(i >= aLo and i <= aHi ? vaCol : outCol, i >= aLo and i <= aHi ? 72 : 80))
+            else
+                box.set_lefttop(b, na, na)
+                box.set_rightbottom(b, na, na)
+        line.set_xy1(cPoc, curStart, aPoc)
+        line.set_xy2(cPoc, bar_index, aPoc)
+        line.set_xy1(cVah, curStart, aVah)
+        line.set_xy2(cVah, bar_index, aVah)
+        line.set_xy1(cVal, curStart, aVal)
+        line.set_xy2(cVal, bar_index, aVal)
+    if not na(pPoc)
+        line.set_xy1(xVah, pStart, pVah)
+        line.set_xy2(xVah, xR, pVah)
+        line.set_xy1(xPoc, pStart, pPoc)
+        line.set_xy2(xPoc, xR, pPoc)
+        line.set_xy1(xVal, pStart, pVal)
+        line.set_xy2(xVal, xR, pVal)
+        label.set_xy(xVahL, xR, pVah)
+        label.set_text(xVahL, "yday value top " + fmtP(pVah))
+        label.set_xy(xPocL, xR, pPoc)
+        label.set_text(xPocL, "yday fair price " + fmtP(pPoc))
+        label.set_xy(xValL, xR, pVal)
+        label.set_text(xValL, "yday value bottom " + fmtP(pVal))
+    if showOTE and oteOk and (oteWith or showCounter)
+        oCol = oteDir == -1 ? bearCol : bullCol
+        box.set_lefttop(oteBox, math.min(swHx, swLx), oteTop)
+        box.set_rightbottom(oteBox, xR, oteBot)
+        box.set_bgcolor(oteBox, color.new(oCol, oteConf ? 78 : oteWith ? 88 : 94))
+        box.set_border_color(oteBox, color.new(oCol, oteConf ? 20 : oteWith ? 60 : 80))
+        box.set_text(oteBox, "pullback zone" + (oteConf ? " ★" : oteWith ? "" : " (against trend)"))
+        box.set_text_color(oteBox, oCol)
+    else
+        box.set_lefttop(oteBox, na, na)
+        box.set_rightbottom(oteBox, na, na)
+
+// ───────────────────────── Panel ─────────────────────────
+tSize = tblSize == "Tiny" ? size.tiny : tblSize == "Normal" ? size.normal : size.small
+pPos  = panelPos == "Bottom right" ? position.bottom_right : panelPos == "Middle right" ? position.middle_right : panelPos == "Top left" ? position.top_left : panelPos == "Bottom left" ? position.bottom_left : panelPos == "Middle left" ? position.middle_left : position.top_right
+var table panel = table.new(pPos, 2, 8, bgcolor = color.new(#131722, 20), border_width = 0, frame_color = color.new(#2a2e39, 0), frame_width = 1)
+
+pRow(int r, string k, string v, color c) =>
+    table.cell(panel, 0, r, k, text_color = weakCol, text_size = tSize, text_halign = text.align_left)
+    table.cell(panel, 1, r, v, text_color = c, text_size = tSize, text_halign = text.align_left)
+    true
+
+if barstate.islast and showPanel
+    mCol = migDir == 1 ? bullCol : migDir == -1 ? bearCol : weakCol
+    mTxt = not intraday ? "VALUE FLOW · intraday only" : migDir == 1 ? "▲ BUYERS IN CONTROL · " + str.tostring(migStreak) + "d" : migDir == -1 ? "▼ SELLERS IN CONTROL · " + str.tostring(migStreak) + "d" : "◆ NO TREND · value overlapping"
+    table.cell(panel, 0, 0, mTxt, bgcolor = color.new(mCol, 80), text_color = mCol, text_size = tSize)
+    table.merge_cells(panel, 0, 0, 1, 0)
+    if intraday
+        pRow(2, "Yday value", na(pPoc) ? "—" : fmtP(pVal) + "–" + fmtP(pVah), textCol)
+        pRow(3, "Yday fair price", na(pPoc) ? "—" : fmtP(pPoc), pocCol)
+        whereTxt = na(pPoc) ? "—" : close > pVah ? "above yday value" : close < pVal ? "below yday value" : "inside yday value"
+        pRow(4, "Price now", whereTxt, textCol)
+        devDir = na(cPocV) or na(pPoc) ? 0 : cPocV > pPoc and cValV > pVal ? 1 : cPocV < pPoc and cVahV < pVah ? -1 : 0
+        pRow(5, "Today so far", devDir == 1 ? "▲ trading higher" : devDir == -1 ? "▼ trading lower" : "◆ same area", devDir == 1 ? bullCol : devDir == -1 ? bearCol : weakCol)
+        pRow(6, "Pullback zone", oteWith ? fmtP(oteBot) + "–" + fmtP(oteTop) + (oteConf ? " ★" : "") : "none", oteWith ? (oteDir == -1 ? bearCol : bullCol) : weakCol)
+        pRow(7, "Signals", str.tostring(sigCount) + " of " + str.tostring(maxSig) + " used", bestGone or sigCount >= maxSig ? weakCol : textCol)
+        // the plan: nearest level in the trend's direction (sell the first one above price, buy the first one below)
+        float zLvl = na
+        string zName = ""
+        if migDir == -1
+            if not na(pVal) and pVal > close
+                zLvl := pVal
+                zName := "value bottom"
+            if not na(pPoc) and pPoc > close and (na(zLvl) or pPoc < zLvl)
+                zLvl := pPoc
+                zName := "fair price"
+            if na(zLvl) and not na(pVah) and pVah > close
+                zLvl := pVah
+                zName := "value top"
+            if oteWith and oteBot > close and (na(zLvl) or oteBot < zLvl)
+                zLvl := oteBot
+                zName := "pullback zone"
+        if migDir == 1
+            if not na(pVah) and pVah < close
+                zLvl := pVah
+                zName := "value top"
+            if not na(pPoc) and pPoc < close and (na(zLvl) or pPoc > zLvl)
+                zLvl := pPoc
+                zName := "fair price"
+            if na(zLvl) and not na(pVal) and pVal < close
+                zLvl := pVal
+                zName := "value bottom"
+            if oteWith and oteTop < close and (na(zLvl) or oteTop > zLvl)
+                zLvl := oteTop
+                zName := "pullback zone"
+        string plan = ""
+        color vCol = weakCol
+        if migDir == 0
+            plan := "WAIT\nno clear trend yet"
+        else if bestGone
+            plan := "DONE for today\nbig move already made"
+        else if sigCount >= maxSig
+            plan := "DONE for today\n" + str.tostring(maxSig) + " signals used"
+        else if na(zLvl)
+            plan := migDir == -1 ? "WAIT\nno level above to sell" : "WAIT\nno level below to buy"
+        else
+            plan := (migDir == -1 ? "SELL a rally to " : "BUY a dip to ") + fmtP(zLvl) + "\n(yday " + zName + ", wait for rejection)"
+            if zName == "pullback zone"
+                plan := (migDir == -1 ? "SELL a rally to " : "BUY a dip to ") + fmtP(zLvl) + "\n(pullback zone, wait for rejection)"
+            vCol := migDir == -1 ? bearCol : bullCol
+        table.cell(panel, 0, 1, plan, bgcolor = color.new(vCol, 80), text_color = vCol, text_size = tSize)
+        table.merge_cells(panel, 0, 1, 1, 1)
+
+// ───────────────────────── Alerts ─────────────────────────
+alertcondition(sellSig, "Value Flow SELL", "TWI-VF SELL on {{ticker}} {{interval}} (rally rejected at prior value / OTE)")
+alertcondition(buySig, "Value Flow BUY", "TWI-VF BUY on {{ticker}} {{interval}} (dip held at prior value / OTE)")
+alertcondition(enteredVA, "Entered prior value area", "TWI-VF price entered the prior day's value area on {{ticker}} {{interval}}")
