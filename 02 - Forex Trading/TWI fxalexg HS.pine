@@ -1,0 +1,369 @@
+//@version=6
+// TWI fxalexg HS — V1 (original, un-optimized) of fxalexg's head & shoulders strategy, per [[fxalexg HS Strategy Spec]] (2026-09-30).
+// VIDEO RULES: reversal pattern; LS → NP1 → HEAD (beyond the LS) → the post-head structure point CLOSES beyond NP1 (the flip:
+//   neckline now slopes the reversal way, the pattern exists) → right shoulder rejects from the equal-LS zone.
+//   AGGRESSIVE (high risk): rejection candle (engulfing / morning star) at the potential RS, stop beyond the head or a bit beyond the RS.
+//   CONFIRMED (actual trade): neckline break, retest, same rejection candle. Aggressive + confirmed together = scaling in.
+// TEST DEFAULTS (not in the video, change in settings): shoulder tolerance, zone pad, head separation, neckline break = close,
+//   retest tolerance, confirmed-entry stop, take profit, setup age, strong-level and prior-trend filters (off by default).
+// No repaint: swings are used only after their right-side bars close; flip / rejection / break / retest are candle-close events.
+// Scorecard: each entry type is its own virtual trade, played forward; SL and TP in the same bar = loss. No breakeven (none in video).
+indicator("TWI fxalexg HS", shorttitle = "fxalexg HS", overlay = true, max_lines_count = 400, max_labels_count = 400, max_bars_back = 1000)
+
+grpP = "Pattern"
+grpE = "Entries"
+grpX = "Stops / targets"
+grpF = "Filters (video rules, TEST definitions)"
+grpD = "Display"
+dirIn    = input.string("Both", "Direction", options = ["Both", "Inverse H&S only (buys)", "Regular H&S only (sells)"], group = grpP)
+pivL     = input.int(2, "Swing left bars", minval = 1, group = grpP)
+pivR     = input.int(2, "Swing right bars (confirmation delay)", minval = 1, group = grpP)
+sepATR   = input.float(0.25, "Head beyond LS by, x ATR (TEST)", minval = 0, step = 0.05, group = grpP)
+shTol    = input.float(0.5, "Shoulders level within, x ATR (TEST)", minval = 0.05, step = 0.05, group = grpP)
+padATR   = input.float(0.25, "Shoulder zone pad, x ATR (TEST)", minval = 0, step = 0.05, group = grpP)
+minLeg   = input.int(3, "Min bars LS→Head (TEST)", minval = 1, group = grpP)
+maxLeg   = input.int(60, "Max bars LS→Head (TEST)", minval = 5, group = grpP)
+maxAge   = input.int(150, "Setup expires N bars after the head (TEST)", minval = 20, group = grpP)
+styleIn  = input.string("Both (scale in)", "Entry style", options = ["Both (scale in)", "Aggressive shoulder only", "Confirmed neckline only"], group = grpE)
+useEng   = input.bool(true, "Trigger: engulfing (video)", group = grpE)
+useStar  = input.bool(true, "Trigger: morning / evening star (video)", group = grpE)
+starBody = input.float(0.3, "Star middle-candle max body, fraction of range (TEST)", minval = 0.05, maxval = 0.8, step = 0.05, group = grpE)
+brkIn    = input.string("Close beyond", "Neckline break (TEST)", options = ["Close beyond", "Wick beyond"], group = grpE)
+brkBuf   = input.float(0.0, "Break buffer, x ATR (TEST)", minval = 0, step = 0.05, group = grpE)
+retTol   = input.float(0.3, "Retest tolerance, x ATR (TEST)", minval = 0, step = 0.05, group = grpE)
+maxRet   = input.int(30, "Retest must come within N bars of the break (TEST)", minval = 2, group = grpE)
+stopAgg  = input.string("Beyond head", "Aggressive stop (both are video options)", options = ["Beyond head", "Beyond right shoulder"], group = grpX)
+stopConf = input.string("Beyond retest swing", "Confirmed stop (TEST)", options = ["Beyond retest swing", "Beyond right shoulder", "Beyond head"], group = grpX)
+bufATR   = input.float(0.1, "Stop buffer, x ATR (TEST)", minval = 0, step = 0.05, group = grpX)
+tpIn     = input.string("Measured move", "Target (TEST)", options = ["Measured move", "Fixed R"], group = grpX)
+tpFac    = input.float(1.0, "Measured move x", minval = 0.3, step = 0.1, group = grpX)
+fixR     = input.float(4.0, "Fixed R", minval = 0.5, step = 0.5, group = grpX)
+minRR    = input.float(0.0, "Minimum R:R (video: none)", minval = 0, step = 0.5, group = grpX)
+useLevel = input.bool(false, "Require strong level at head/LS (video rule)", group = grpF)
+lvlTol   = input.float(0.5, "Level: prior swing within x ATR", minval = 0.1, step = 0.1, group = grpF)
+lvlTouch = input.int(1, "Level: prior swings needed", minval = 1, group = grpF)
+lvlLook  = input.int(300, "Level: lookback bars before LS", minval = 20, maxval = 900, group = grpF)
+useTrend = input.bool(false, "Require prior trend into LS (video rule)", group = grpF)
+trATR    = input.float(3.0, "Prior trend: move into LS >= x ATR", minval = 0.5, step = 0.5, group = grpF)
+trBars   = input.int(50, "Prior trend lookback bars", minval = 5, maxval = 400, group = grpF)
+showPat  = input.bool(true, "Draw patterns and trades", group = grpD)
+cardPos  = input.string("Bottom Right", "Scorecard position", options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group = grpD)
+bullC    = input.color(#089981, "Buy color", group = grpD)
+bearC    = input.color(#f23645, "Sell color", group = grpD)
+
+bool allowAgg  = styleIn != "Confirmed neckline only"
+bool allowConf = styleIn != "Aggressive shoulder only"
+atr = ta.atr(14)
+
+// ── swings (confirmed pivR bars after the fact) ──
+float pLo = ta.pivotlow(low, pivL, pivR)
+float pHi = ta.pivothigh(high, pivL, pivR)
+var array<float> loP = array.new<float>()
+var array<int>   loI = array.new<int>()
+var array<float> hiP = array.new<float>()
+var array<int>   hiI = array.new<int>()
+if not na(pLo)
+    array.push(loP, pLo), array.push(loI, bar_index - pivR)
+    if array.size(loP) > 60
+        array.shift(loP), array.shift(loI)
+if not na(pHi)
+    array.push(hiP, pHi), array.push(hiI, bar_index - pivR)
+    if array.size(hiP) > 60
+        array.shift(hiP), array.shift(hiI)
+
+// ── candles (d = +1 bullish, -1 bearish) ──
+f_engulf(int d) => d * (close - open) > 0 and d * (close[1] - open[1]) < 0 and d * close >= d * open[1] and d * open <= d * close[1]
+f_star(int d) =>
+    float r1 = high[1] - low[1]
+    d * (close[2] - open[2]) < 0 and r1 > 0 and math.abs(close[1] - open[1]) <= starBody * r1 and d * (close - open) > 0 and d * close > d * (open[2] + close[2]) / 2
+f_trig(int d) => (useEng and f_engulf(d)) or (useStar and f_star(d))
+f_sh(int d, int k) => d == 1 ? low[k] : high[k]      // shoulder-side price
+f_nk(int d, int k) => d == 1 ? high[k] : low[k]      // neckline-side price
+
+// ── state ──
+// 0 idle, 1 wait flip, 2 wait RS (flipped), 3 wait break, 4 wait retest
+type Cand
+    int   d
+    int   st = 0
+    float ls
+    int   lsI
+    float hd
+    int   hI
+    float n1
+    int   n1I
+    float n2
+    int   n2I
+    bool  frozen = false
+    float rsx
+    int   brkI
+    bool  aggTaken = false
+    bool  broke = false
+
+type Tr
+    bool  on = false
+    int   d
+    float entry
+    float sl
+    float tp
+    int   eI
+    line  slL
+    line  tpL
+
+var Cand CL = Cand.new(1)
+var Cand CS = Cand.new(-1)
+var Tr TA = Tr.new()
+var Tr TC = Tr.new()
+// stats: 0 n, 1 wins, 2 losses, 3 sumR, 4 grossW, 5 grossL, 6 peak, 7 maxDD, 8 sumPlannedRR, 9 sumStopATR
+var array<float> sA = array.new<float>(10, 0.0)
+var array<float> sC = array.new<float>(10, 0.0)
+var array<float> sT = array.new<float>(10, 0.0)
+// aggressive outcome vs confirmation: 0 later confirmed (neck broke), 1 pattern died before the break
+var array<int> aggFate = array.new<int>(2, 0)
+
+f_neck(Cand c, int idx) => c.n2I == c.n1I ? c.n2 : c.n1 + (c.n2 - c.n1) * (idx - c.n1I) / (c.n2I - c.n1I)
+
+f_kill(Cand c) =>
+    if c.aggTaken and not c.broke
+        array.set(aggFate, 1, array.get(aggFate, 1) + 1)
+    c.st := 0
+    c.frozen := false
+    c.aggTaken := false
+    c.broke := false
+    0
+
+f_lbl(int x, float y, string t, int d, bool below) =>
+    if showPat
+        label.new(x, y, t, style = below ? label.style_label_up : label.style_label_down, color = color.new(d == 1 ? bullC : bearC, 65), textcolor = color.white, size = size.tiny)
+    0
+
+// prior swings near a price (strong-level TEST)
+f_level(int d, float px, int beforeI) =>
+    array<float> P = d == 1 ? loP : hiP
+    array<int>   I = d == 1 ? loI : hiI
+    int cnt = 0
+    for j = 0 to array.size(P) - 1
+        int ii = array.get(I, j)
+        if ii < beforeI and ii >= beforeI - lvlLook and math.abs(array.get(P, j) - px) <= lvlTol * atr
+            cnt += 1
+    cnt >= lvlTouch
+
+// try to build a candidate when a new shoulder-side swing (the head candidate) is confirmed
+f_build(Cand c) =>
+    array<float> P = c.d == 1 ? loP : hiP
+    array<int>   I = c.d == 1 ? loI : hiI
+    int n = array.size(P)
+    if c.st == 0 and n >= 2
+        float hd = array.get(P, n - 1)
+        int hI = array.get(I, n - 1)
+        float ls = array.get(P, n - 2)
+        int lsI = array.get(I, n - 2)
+        bool ok = c.d * hd < c.d * ls - sepATR * atr and hI - lsI >= minLeg and hI - lsI <= maxLeg and bar_index - lsI + math.max(trBars, 1) < 990
+        if ok
+            float n1 = na
+            int n1I = na
+            for k = bar_index - hI + 1 to bar_index - lsI - 1
+                float v = f_nk(c.d, k)
+                if na(n1) or c.d * v > c.d * n1
+                    n1 := v
+                    n1I := bar_index - k
+            ok := not na(n1)
+            if ok and useTrend
+                float ext = na
+                for k = bar_index - lsI + 1 to bar_index - lsI + trBars
+                    float v = f_nk(c.d, k)
+                    if na(ext) or c.d * v > c.d * ext
+                        ext := v
+                ok := c.d * (ext - ls) >= trATR * atr
+            if ok and useLevel
+                ok := f_level(c.d, ls, lsI) or f_level(c.d, hd, lsI)
+            if ok
+                c.ls := ls, c.lsI := lsI, c.hd := hd, c.hI := hI, c.n1 := n1, c.n1I := n1I
+                c.st := 1, c.frozen := false, c.aggTaken := false, c.broke := false
+                // a flip that already closed while the head swing was being confirmed
+                for k = bar_index - hI - 1 to 0
+                    if c.st == 1 and c.d * close[k] > c.d * n1
+                        c.st := 2
+                if showPat
+                    f_lbl(lsI, ls, "LS", c.d, c.d == 1)
+                    f_lbl(hI, hd, "HEAD", c.d, c.d == 1)
+    0
+
+f_open(Tr t, int d, float entry, float sl, float tp, string tag, array<float> s) =>
+    bool did = false
+    float risk = math.abs(entry - sl)
+    float rew = d * (tp - entry)
+    if not t.on and risk > 0 and rew > 0 and rew / risk >= minRR
+        t.on := true, t.d := d, t.entry := entry, t.sl := sl, t.tp := tp, t.eI := bar_index
+        array.set(s, 8, array.get(s, 8) + rew / risk)
+        array.set(s, 9, array.get(s, 9) + risk / atr)
+        array.set(sT, 8, array.get(sT, 8) + rew / risk)
+        array.set(sT, 9, array.get(sT, 9) + risk / atr)
+        did := true
+        if showPat
+            color col = d == 1 ? bullC : bearC
+            label.new(bar_index, d == 1 ? low : high, tag + (d == 1 ? " BUY " : " SELL ") + str.tostring(rew / risk, "#.#") + "R", style = d == 1 ? label.style_label_up : label.style_label_down, color = col, textcolor = color.white, size = size.small)
+            t.slL := line.new(bar_index, sl, bar_index + 1, sl, color = bearC)
+            t.tpL := line.new(bar_index, tp, bar_index + 1, tp, color = bullC)
+    did
+
+f_stat(array<float> s, float r) =>
+    array.set(s, 0, array.get(s, 0) + 1)
+    if r > 0
+        array.set(s, 1, array.get(s, 1) + 1)
+        array.set(s, 4, array.get(s, 4) + r)
+    else
+        array.set(s, 2, array.get(s, 2) + 1)
+        array.set(s, 5, array.get(s, 5) - r)
+    array.set(s, 3, array.get(s, 3) + r)
+    array.set(s, 6, math.max(array.get(s, 6), array.get(s, 3)))
+    array.set(s, 7, math.max(array.get(s, 7), array.get(s, 6) - array.get(s, 3)))
+    0
+
+f_manage(Tr t, array<float> s) =>
+    if t.on and bar_index > t.eI
+        bool hitSL = t.d == 1 ? low <= t.sl : high >= t.sl
+        bool hitTP = t.d == 1 ? high >= t.tp : low <= t.tp
+        if showPat and not na(t.slL)
+            line.set_x2(t.slL, bar_index)
+            line.set_x2(t.tpL, bar_index)
+        if hitSL or hitTP
+            float r = hitSL ? -1.0 : math.abs(t.tp - t.entry) / math.abs(t.entry - t.sl)
+            f_stat(s, r)
+            f_stat(sT, r)
+            t.on := false
+            if showPat
+                label.new(bar_index, t.d == 1 ? high : low, r > 0 ? "+" + str.tostring(r, "#.#") + "R" : "-1R", style = label.style_none, textcolor = r > 0 ? bullC : bearC, size = size.small)
+    0
+
+f_target(Cand c, float entry, float sl) =>
+    tpIn == "Fixed R" ? entry + c.d * fixR * math.abs(entry - sl) : f_neck(c, bar_index) + c.d * math.abs(f_neck(c, c.hI) - c.hd) * tpFac
+
+// per-bar state machine
+f_step(Cand c) =>
+    if c.st > 0 and bar_index - c.hI > maxAge
+        f_kill(c)
+    if c.st > 0 and c.d * f_sh(c.d, 0) <= c.d * c.hd and not (c.st == 1 and bar_index - c.hI <= pivR)
+        f_kill(c)          // price traded through the head: new extreme, no H&S ("fake head and shoulders")
+    if c.st == 1
+        if c.d * close > c.d * c.n1
+            c.st := 2      // structure point closed beyond NP1: pattern exists, neckline slopes the reversal way
+    else if c.st == 2
+        if not c.frozen
+            array<float> P = c.d == 1 ? hiP : loP
+            array<int>   I = c.d == 1 ? hiI : loI
+            int n = array.size(P)
+            if n > 0 and array.get(I, n - 1) > c.hI and bar_index - array.get(I, n - 1) == pivR
+                float n2 = na
+                int n2I = na
+                for k = bar_index - c.hI - 1 to pivR
+                    float v = f_nk(c.d, k)
+                    if na(n2) or c.d * v > c.d * n2
+                        n2 := v
+                        n2I := bar_index - k
+                if c.d * n2 > c.d * c.n1
+                    c.n2 := n2, c.n2I := n2I, c.frozen := true
+                    float rx = na
+                    for k = bar_index - n2I to 0
+                        float v = f_sh(c.d, k)
+                        if na(rx) or c.d * v < c.d * rx
+                            rx := v
+                    c.rsx := rx
+                    if showPat
+                        line.new(c.n1I, c.n1, c.n2I, c.n2, extend = extend.right, color = color.new(#2962ff, 25), style = line.style_dashed)
+        else
+            c.rsx := c.d == 1 ? math.min(c.rsx, low) : math.max(c.rsx, high)
+            float neck = f_neck(c, bar_index)
+            bool brk = brkIn == "Close beyond" ? c.d * close > c.d * neck + brkBuf * atr : c.d * f_nk(c.d, 0) > c.d * neck + brkBuf * atr
+            bool inZone = c.d * f_sh(c.d, 0) <= c.d * c.ls + padATR * atr and math.abs(c.rsx - c.ls) <= shTol * atr
+            if brk
+                c.broke := true, c.brkI := bar_index, c.st := 4
+            else if inZone and f_trig(c.d)
+                if showPat
+                    f_lbl(bar_index, c.rsx, "RS", c.d, c.d == 1)
+                if allowAgg
+                    float sl = (stopAgg == "Beyond head" ? c.hd : c.rsx) - c.d * bufATR * atr
+                    if f_open(TA, c.d, close, sl, f_target(c, close, sl), "AGG", sA)
+                        c.aggTaken := true
+                c.st := 3
+    else if c.st == 3
+        float neck = f_neck(c, bar_index)
+        if c.d * close < c.d * c.rsx
+            f_kill(c)
+        else
+            bool brk = brkIn == "Close beyond" ? c.d * close > c.d * neck + brkBuf * atr : c.d * f_nk(c.d, 0) > c.d * neck + brkBuf * atr
+            if brk
+                c.broke := true, c.brkI := bar_index, c.st := 4
+                if c.aggTaken
+                    array.set(aggFate, 0, array.get(aggFate, 0) + 1)
+    else if c.st == 4
+        float neck = f_neck(c, bar_index)
+        if c.d * close < c.d * neck - retTol * atr or bar_index - c.brkI > maxRet
+            f_kill(c)
+        else if bar_index > c.brkI and c.d * f_sh(c.d, 0) <= c.d * neck + retTol * atr and c.d * close > c.d * neck and f_trig(c.d)
+            if allowConf
+                float sw = c.d == 1 ? math.min(low, low[1], low[2]) : math.max(high, high[1], high[2])
+                float base = stopConf == "Beyond retest swing" ? sw : stopConf == "Beyond right shoulder" ? c.rsx : c.hd
+                float sl = base - c.d * bufATR * atr
+                f_open(TC, c.d, close, sl, f_target(c, close, sl), "CONF", sC)
+            c.st := 0, c.frozen := false, c.aggTaken := false, c.broke := false
+    0
+
+// order matters: resolve open trades on this bar first, then look for new entries
+f_manage(TA, sA)
+f_manage(TC, sC)
+bool okL = dirIn != "Regular H&S only (sells)"
+bool okS = dirIn != "Inverse H&S only (buys)"
+if okL
+    f_step(CL)
+    if not na(pLo)
+        f_build(CL)
+if okS
+    f_step(CS)
+    if not na(pHi)
+        f_build(CS)
+
+bool aggL = TA.on and TA.eI == bar_index and TA.d == 1
+bool aggS = TA.on and TA.eI == bar_index and TA.d == -1
+bool cfL  = TC.on and TC.eI == bar_index and TC.d == 1
+bool cfS  = TC.on and TC.eI == bar_index and TC.d == -1
+alertcondition(aggL, "AGGRESSIVE buy (potential RS)", "fxalexg HS: HIGH RISK inverse H&S shoulder BUY on {{ticker}} {{interval}}")
+alertcondition(aggS, "AGGRESSIVE sell (potential RS)", "fxalexg HS: HIGH RISK H&S shoulder SELL on {{ticker}} {{interval}}")
+alertcondition(cfL, "CONFIRMED buy (neckline retest)", "fxalexg HS: confirmed inverse H&S neckline-retest BUY on {{ticker}} {{interval}}")
+alertcondition(cfS, "CONFIRMED sell (neckline retest)", "fxalexg HS: confirmed H&S neckline-retest SELL on {{ticker}} {{interval}}")
+
+// ── scorecard ──
+var int firstT = time
+f_pos(string p) => p == "Top Right" ? position.top_right : p == "Bottom Right" ? position.bottom_right : p == "Top Left" ? position.top_left : position.bottom_left
+var table card = table.new(f_pos(cardPos), 4, 12, bgcolor = color.new(#131722, 10), border_color = color.new(color.gray, 70), border_width = 1)
+f_cell(int col, int row, string t, color c) => table.cell(card, col, row, t, text_color = c, text_size = size.small, text_halign = col == 0 ? text.align_left : text.align_center)
+f_colstats(int col, array<float> s) =>
+    float n = array.get(s, 0)
+    float pf = array.get(s, 5) > 0 ? array.get(s, 4) / array.get(s, 5) : na
+    f_cell(col, 1, str.tostring(n, "#"), color.white)
+    f_cell(col, 2, str.tostring(array.get(s, 1), "#") + " / " + str.tostring(array.get(s, 2), "#"), color.silver)
+    f_cell(col, 3, n > 0 ? str.tostring(100 * array.get(s, 1) / n, "#") + "%" : "—", color.silver)
+    f_cell(col, 4, str.tostring(array.get(s, 3), "+#.#;-#.#") + "R", array.get(s, 3) >= 0 ? bullC : bearC)
+    f_cell(col, 5, n > 0 ? str.tostring(array.get(s, 3) / n, "+#.##;-#.##") + "R" : "—", color.silver)
+    f_cell(col, 6, na(pf) ? "—" : str.tostring(pf, "#.##"), na(pf) ? color.silver : pf >= 1 ? bullC : bearC)
+    f_cell(col, 7, str.tostring(array.get(s, 7), "#.#") + "R", color.silver)
+    f_cell(col, 8, n > 0 ? str.tostring(array.get(s, 8) / n, "#.#") + "R" : "—", color.silver)
+    f_cell(col, 9, n > 0 ? str.tostring(array.get(s, 9) / n, "#.#") + " ATR" : "—", color.silver)
+if barstate.islast
+    f_cell(0, 0, "fxalexg HS V1 · " + timeframe.period, color.white)
+    f_cell(1, 0, "Aggressive", color.orange)
+    f_cell(2, 0, "Confirmed", color.aqua)
+    f_cell(3, 0, "Combined", color.white)
+    array<string> names = array.from("Trades", "Wins / Losses", "Win rate", "Net", "Avg per trade (expectancy)", "Profit factor", "Max drawdown", "Avg planned R:R", "Avg stop")
+    for i = 0 to 8
+        f_cell(0, i + 1, array.get(names, i), color.gray)
+    f_colstats(1, sA)
+    f_colstats(2, sC)
+    f_colstats(3, sT)
+    f_cell(0, 10, "Aggressive → later neck break / died first", color.gray)
+    f_cell(1, 10, str.tostring(array.get(aggFate, 0)) + " / " + str.tostring(array.get(aggFate, 1)), color.orange)
+    f_cell(2, 10, "", color.gray)
+    f_cell(3, 10, "", color.gray)
+    f_cell(0, 11, "Since " + str.format_time(firstT, "yyyy-MM-dd", syminfo.timezone), color.gray)
+    f_cell(1, 11, "Level " + (useLevel ? "ON" : "off"), color.gray)
+    f_cell(2, 11, "Trend " + (useTrend ? "ON" : "off"), color.gray)
+    f_cell(3, 11, "TP " + (tpIn == "Fixed R" ? str.tostring(fixR) + "R" : "measured"), color.gray)

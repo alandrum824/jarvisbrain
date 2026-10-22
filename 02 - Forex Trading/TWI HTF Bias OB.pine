@@ -1,21 +1,42 @@
 //@version=6
-// TWI HTF Bias OB — Daily + H4 bullish/bearish dashboard, and order blocks that caused a CHoCH / BOS.
+// TWI HTF Bias OB — Daily + H4 bias dashboard, order blocks that caused a CHoCH / BOS,
+// and (v2, 2026-09-29) the SMC Playbook checklist: dealing range + premium/discount, liquidity target,
+// sweeps, displacement, FVGs, POI in the right half, structure shift, R:R and lot-size gate.
 // Structure: swing highs/lows (N bars each side). A close through the last swing = BOS if with the trend, CHoCH if against it.
 // Order block = the last opposite-colored candle before the break, searched back to the swing extreme of that leg.
-// An OB is deleted once price CLOSES through it; its border turns dashed once price has come back into it (tested).
-indicator("TWI HTF Bias OB", shorttitle = "TWI BiasOB", overlay = true, max_boxes_count = 200, max_lines_count = 200, max_labels_count = 200, max_bars_back = 500)
+// Sweep = a wick through an unbroken swing that CLOSES back inside it.
+// An OB / FVG is deleted once price CLOSES through it; an OB's border turns dashed once price has come back into it (tested).
+indicator("TWI HTF Bias OB", shorttitle = "TWI BiasOB", overlay = true, max_boxes_count = 300, max_lines_count = 200, max_labels_count = 200, max_bars_back = 500)
 
 grpS = "Structure"
 grpO = "Order blocks"
+grpF = "FVG / displacement"
+grpC = "Checklist"
+grpR = "Risk (lot-size gate)"
 grpD = "Dashboard"
 len        = input.int(3, "Chart swing length", minval = 1, group = grpS, tooltip = "Bars each side of a swing high / low on the chart timeframe")
 htfLen     = input.int(3, "H4 / Daily swing length", minval = 1, group = grpS)
 showStruct = input.bool(true, "Show CHoCH / BOS lines", group = grpS)
+showSweep  = input.bool(true, "Mark liquidity sweeps", group = grpS)
 maxOB      = input.int(5, "Max chart OBs per side", minval = 1, maxval = 30, group = grpO)
 showH4     = input.bool(true, "Show latest H4 OBs", group = grpO)
 showD      = input.bool(true, "Show latest Daily OBs", group = grpO)
 bullC      = input.color(#089981, "Bull color", group = grpO)
 bearC      = input.color(#f23645, "Bear color", group = grpO)
+showFVG    = input.bool(true, "Show FVGs", group = grpF)
+maxFVG     = input.int(5, "Max FVGs per side", minval = 1, maxval = 30, group = grpF)
+dispMult   = input.float(1.5, "Displacement: body ≥ ATR ×", minval = 0.5, step = 0.1, group = grpF)
+showDisp   = input.bool(true, "Mark displacement candles", group = grpF)
+rngTF      = input.string("H4", "Dealing range timeframe", options = ["H4", "Daily"], group = grpC, tooltip = "The leg that made the last break on this timeframe = the dealing range. Above its 50% = premium (sell side), below = discount (buy side).")
+showRange  = input.bool(true, "Shade premium / discount", group = grpC)
+swLook     = input.int(40, "Sweep must be within the last N bars", minval = 5, group = grpC)
+minR       = input.float(2.0, "Minimum R:R to the target", minval = 0.5, step = 0.5, group = grpC)
+showCheck  = input.bool(true, "Show checklist", group = grpC)
+chkPos     = input.string("Bottom Left", "Checklist position", options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group = grpC)
+chkSize    = input.string("Small", "Checklist text", options = ["Small", "Tiny", "Normal"], group = grpC)
+bal        = input.float(237.26, "Account balance", minval = 1, group = grpR, tooltip = "Update this by hand. It isn't read from the broker.")
+riskPct    = input.float(2.0, "Max risk % per trade", minval = 0.1, step = 0.1, group = grpR)
+contract   = input.float(100, "Contract size per 1.00 lot", minval = 1, group = grpR, tooltip = "Gold = 100 (oz). USD-quoted FX (EURUSD, GBPUSD, AUDUSD) = 100000. Not valid for JPY or CAD-quoted pairs.")
 dashPos    = input.string("Top Right", "Position", options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group = grpD)
 
 // ── Structure engine (used on the chart and inside request.security) ──
@@ -24,10 +45,12 @@ f_struct(int L) =>
     var int    hT    = na
     var int    hI    = na
     var bool   hDone = true
+    var bool   hSw   = false
     var float  lP    = na
     var int    lT    = na
     var int    lI    = na
     var bool   lDone = true
+    var bool   lSw   = false
     var int    trend = 0
     var string ev    = "none"
     var float  evLvl = na
@@ -38,8 +61,15 @@ f_struct(int L) =>
     var float  sTop  = na
     var float  sBot  = na
     var int    sT    = na
-    bool bullBrk = false
-    bool bearBrk = false
+    var float  legHi = na
+    var int    legHT = na
+    var float  legLo = na
+    var int    legLT = na
+    bool  bullBrk = false
+    bool  bearBrk = false
+    bool  swBear  = false   // buy-side liquidity (a swing high) swept, closed back below
+    bool  swBull  = false   // sell-side liquidity (a swing low) swept, closed back above
+    float swLvl   = na
     float ph = ta.pivothigh(high, L, L)
     float pl = ta.pivotlow(low, L, L)
     if not na(ph)
@@ -47,11 +77,21 @@ f_struct(int L) =>
         hT    := time[L]
         hI    := bar_index - L
         hDone := false
+        hSw   := false
     if not na(pl)
         lP    := pl
         lT    := time[L]
         lI    := bar_index - L
         lDone := false
+        lSw   := false
+    if not hDone and not hSw and high > hP and close <= hP
+        hSw    := true
+        swBear := true
+        swLvl  := hP
+    if not lDone and not lSw and low < lP and close >= lP
+        lSw    := true
+        swBull := true
+        swLvl  := lP
     if not hDone and close > hP
         hDone   := true
         bullBrk := true
@@ -69,9 +109,13 @@ f_struct(int L) =>
             if close[k] < open[k]
                 ob := k
                 break
-        bTop := high[ob]
-        bBot := low[ob]
-        bT   := time[ob]
+        bTop  := high[ob]
+        bBot  := low[ob]
+        bT    := time[ob]
+        legLo := low[lo]
+        legLT := time[lo]
+        legHi := high
+        legHT := time
     if not lDone and close < lP
         lDone   := true
         bearBrk := true
@@ -89,9 +133,20 @@ f_struct(int L) =>
             if close[k] > open[k]
                 ob := k
                 break
-        sTop := high[ob]
-        sBot := low[ob]
-        sT   := time[ob]
+        sTop  := high[ob]
+        sBot  := low[ob]
+        sT    := time[ob]
+        legHi := high[hi]
+        legHT := time[hi]
+        legLo := low
+        legLT := time
+    // the dealing range stretches as the leg makes new extremes
+    if trend == 1 and not bullBrk and high > legHi
+        legHi := high
+        legHT := time
+    if trend == -1 and not bearBrk and low < legLo
+        legLo := low
+        legLT := time
     if not na(bBot) and close < bBot
         bTop := na
         bBot := na
@@ -100,18 +155,18 @@ f_struct(int L) =>
         sTop := na
         sBot := na
         sT   := na
-    [trend, ev, evLvl, evT, bTop, bBot, bT, sTop, sBot, sT, bullBrk, bearBrk]
+    [trend, ev, evLvl, evT, bTop, bBot, bT, sTop, sBot, sT, bullBrk, bearBrk, legHi, legHT, legLo, legLT, swBear, swBull, swLvl]
 
 // Previous (closed) HTF bar only, so the dashboard never repaints on a live H4 / Daily candle
 f_closed(int L) =>
-    [t, e, lv, et, bt, bb, btm, st, sb, stm, bu, be] = f_struct(L)
-    [t[1], e[1], lv[1], bt[1], bb[1], btm[1], st[1], sb[1], stm[1]]
+    [t, e, lv, et, bt, bb, btm, st, sb, stm, bu, be, lh, lht, ll, llt, sw1, sw2, swl] = f_struct(L)
+    [t[1], e[1], lv[1], bt[1], bb[1], btm[1], st[1], sb[1], stm[1], lh[1], lht[1], ll[1], llt[1]]
 
-[dTr, dEv, dLv, dBt, dBb, dBtm, dSt, dSb, dStm]           = request.security(syminfo.tickerid, "D",   f_closed(htfLen), lookahead = barmerge.lookahead_on)
-[h4Tr, h4Ev, h4Lv, h4Bt, h4Bb, h4Btm, h4St, h4Sb, h4Stm] = request.security(syminfo.tickerid, "240", f_closed(htfLen), lookahead = barmerge.lookahead_on)
+[dTr, dEv, dLv, dBt, dBb, dBtm, dSt, dSb, dStm, dLH, dLHT, dLL, dLLT]                 = request.security(syminfo.tickerid, "D",   f_closed(htfLen), lookahead = barmerge.lookahead_on)
+[h4Tr, h4Ev, h4Lv, h4Bt, h4Bb, h4Btm, h4St, h4Sb, h4Stm, h4LH, h4LHT, h4LL, h4LLT]    = request.security(syminfo.tickerid, "240", f_closed(htfLen), lookahead = barmerge.lookahead_on)
 
-// ── Chart-timeframe order blocks ──
-[cTr, cEv, cLv, cEt, cBt, cBb, cBtm, cSt, cSb, cStm, cBu, cBe] = f_struct(len)
+// ── Chart-timeframe structure ──
+[cTr, cEv, cLv, cEt, cBt, cBb, cBtm, cSt, cSb, cStm, cBu, cBe, cLH, cLHT, cLL, cLLT, cSwBear, cSwBull, cSwLvl] = f_struct(len)
 
 var array<box>    bullBoxes = array.new<box>()
 var array<int>    bullBorn  = array.new<int>()
@@ -172,6 +227,125 @@ if array.size(bearBoxes) > 0
             box.set_border_style(bx, line.style_dashed)
             box.set_text(bx, "Bear OB · " + array.get(bearKind, i) + " (tested)")
 
+// ── Sweeps, displacement, FVGs (chart timeframe) ──
+atr  = ta.atr(14)
+body = math.abs(close - open)
+dispBull = close > open and body >= dispMult * atr and body >= 0.6 * (high - low)
+dispBear = close < open and body >= dispMult * atr and body >= 0.6 * (high - low)
+plotshape(showSweep and cSwBear, "Buy-side sweep", shape.xcross, location.abovebar, bearC, text = "sweep", size = size.tiny)
+plotshape(showSweep and cSwBull, "Sell-side sweep", shape.xcross, location.belowbar, bullC, text = "sweep", size = size.tiny)
+plotshape(showDisp and dispBull, "Bull displacement", shape.triangleup, location.belowbar, color.new(bullC, 30), size = size.tiny)
+plotshape(showDisp and dispBear, "Bear displacement", shape.triangledown, location.abovebar, color.new(bearC, 30), size = size.tiny)
+
+var int lastSwBear  = na
+var int lastSwBull  = na
+var int lastDispBull = na
+var int lastDispBear = na
+var int lastBrkBull = na
+var int lastBrkBear = na
+if cSwBear
+    lastSwBear := bar_index
+if cSwBull
+    lastSwBull := bar_index
+if dispBull
+    lastDispBull := bar_index
+if dispBear
+    lastDispBear := bar_index
+if cBu
+    lastBrkBull := bar_index
+if cBe
+    lastBrkBear := bar_index
+
+var array<box> bullF = array.new<box>()
+var array<box> bearF = array.new<box>()
+if showFVG and low > high[2] and close[1] > open[1]
+    array.push(bullF, box.new(time[2], low, time, high[2], xloc = xloc.bar_time, extend = extend.right, bgcolor = color.new(bullC, 90), border_color = color.new(bullC, 60), border_style = line.style_dotted, text = "FVG", text_size = size.tiny, text_color = bullC, text_halign = text.align_right))
+    if array.size(bullF) > maxFVG
+        box.delete(array.shift(bullF))
+if showFVG and high < low[2] and close[1] < open[1]
+    array.push(bearF, box.new(time[2], low[2], time, high, xloc = xloc.bar_time, extend = extend.right, bgcolor = color.new(bearC, 90), border_color = color.new(bearC, 60), border_style = line.style_dotted, text = "FVG", text_size = size.tiny, text_color = bearC, text_halign = text.align_right))
+    if array.size(bearF) > maxFVG
+        box.delete(array.shift(bearF))
+if array.size(bullF) > 0
+    for i = array.size(bullF) - 1 to 0
+        if close < box.get_bottom(array.get(bullF, i))
+            box.delete(array.remove(bullF, i))
+if array.size(bearF) > 0
+    for i = array.size(bearF) - 1 to 0
+        if close > box.get_top(array.get(bearF, i))
+            box.delete(array.remove(bearF, i))
+
+// ── Dealing range, premium / discount ──
+float rHi  = rngTF == "H4" ? h4LH  : dLH
+int   rHT  = rngTF == "H4" ? h4LHT : dLHT
+float rLo  = rngTF == "H4" ? h4LL  : dLL
+int   rLT  = rngTF == "H4" ? h4LLT : dLLT
+float eq   = (rHi + rLo) / 2
+int   dir  = dTr == h4Tr ? dTr : 0
+
+// ── Checklist (computed every bar so it can fire an alert) ──
+// POI = nearest live OB or FVG on the bias side whose zone reaches into the correct half of the range
+f_poi(array<box> a, array<box> f, int d) =>
+    float pTop = na
+    float pBot = na
+    for src = 0 to 1
+        array<box> arr = src == 0 ? a : f
+        if array.size(arr) > 0
+            for i = 0 to array.size(arr) - 1
+                bx = array.get(arr, i)
+                float t = box.get_top(bx)
+                float b = box.get_bottom(bx)
+                bool ok = d == -1 ? (t >= eq and t >= close) : (b <= eq and b <= close)
+                if ok
+                    bool nearer = na(pTop) or (d == -1 ? b < pBot : t > pTop)
+                    if nearer
+                        pTop := t
+                        pBot := b
+    [pTop, pBot]
+
+[pTop, pBot] = f_poi(dir == -1 ? bearBoxes : bullBoxes, dir == -1 ? bearF : bullF, dir)
+
+bool  okBias   = dir != 0 and not na(rHi) and not na(rLo)
+float target   = dir == -1 ? rLo : rHi
+bool  okTarget = okBias and (dir == -1 ? close > target : close < target)
+int   swBar    = dir == -1 ? lastSwBear : lastSwBull
+bool  okSweep  = okBias and not na(swBar) and bar_index - swBar <= swLook
+int   dBar     = dir == -1 ? lastDispBear : lastDispBull
+bool  okDisp   = okSweep and not na(dBar) and dBar >= swBar
+bool  okLoc    = okBias and (dir == -1 ? close >= eq : close <= eq)
+bool  okPOI    = okBias and not na(pTop)
+bool  inPOI    = okPOI and high >= pBot and low <= pTop
+int   bBar     = dir == -1 ? lastBrkBear : lastBrkBull
+bool  okShift  = okSweep and not na(bBar) and bBar > swBar
+float buf      = 0.1 * atr
+float entry    = not okPOI ? na : dir == -1 ? math.max(close, pBot) : math.min(close, pTop)
+float stop     = not okPOI ? na : dir == -1 ? pTop + buf : pBot - buf
+float riskD    = math.abs(entry - stop)
+float rr       = okPOI and riskD > 0 ? math.abs(target - entry) / riskD : na
+bool  okR      = not na(rr) and rr >= minR
+float per001   = riskD * contract * 0.01
+float budget   = bal * riskPct / 100
+float maxLot   = okPOI and riskD > 0 ? math.floor(budget / (riskD * contract) / 0.01) * 0.01 : na
+bool  okSize   = not na(maxLot) and maxLot >= 0.01
+bool  allPass  = okBias and okTarget and okSweep and okDisp and okLoc and okPOI and okShift and okR and okSize
+
+var box  premBox = na
+var box  discBox = na
+var line eqLine  = na
+if barstate.islast and showRange and okBias
+    int t0 = math.min(rHT, rLT)
+    if na(premBox)
+        premBox := box.new(t0, rHi, time, eq, xloc = xloc.bar_time, extend = extend.right, bgcolor = color.new(bearC, 94), border_color = color.new(bearC, 100), text = "PREMIUM · sell side", text_size = size.tiny, text_color = color.new(bearC, 30), text_halign = text.align_left, text_valign = text.align_top)
+        discBox := box.new(t0, eq, time, rLo, xloc = xloc.bar_time, extend = extend.right, bgcolor = color.new(bullC, 94), border_color = color.new(bullC, 100), text = "DISCOUNT · buy side", text_size = size.tiny, text_color = color.new(bullC, 30), text_halign = text.align_left, text_valign = text.align_bottom)
+        eqLine  := line.new(t0, eq, time, eq, xloc = xloc.bar_time, extend = extend.right, color = color.gray, style = line.style_dashed)
+    else
+        box.set_lefttop(premBox, t0, rHi)
+        box.set_rightbottom(premBox, time, eq)
+        box.set_lefttop(discBox, t0, eq)
+        box.set_rightbottom(discBox, time, rLo)
+        line.set_xy1(eqLine, t0, eq)
+        line.set_xy2(eqLine, time, eq)
+
 // ── Latest H4 / Daily OB zones ──
 f_zone(box bx, float top, float bot, int t, color c, string txt, bool show) =>
     box b = bx
@@ -199,14 +373,25 @@ if barstate.islast
 // ── Dashboard ──
 f_bias(int t) => t == 1 ? "BULLISH" : t == -1 ? "BEARISH" : "—"
 f_col(int t)  => t == 1 ? bullC : t == -1 ? bearC : color.gray
-pos = dashPos == "Top Right" ? position.top_right : dashPos == "Bottom Right" ? position.bottom_right : dashPos == "Top Left" ? position.top_left : position.bottom_left
-var table dash = table.new(pos, 4, 5, bgcolor = color.new(#131722, 10), border_color = color.new(color.gray, 70), border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+f_px(float v) => na(v) ? "—" : str.tostring(v, format.mintick)
+f_pos(string p) => p == "Top Right" ? position.top_right : p == "Bottom Right" ? position.bottom_right : p == "Top Left" ? position.top_left : position.bottom_left
+var table dash = table.new(f_pos(dashPos), 4, 5, bgcolor = color.new(#131722, 10), border_color = color.new(color.gray, 70), border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+// Checklist: its own compact 2-column table, no merged cells (phone-width safe)
+var table chk  = table.new(f_pos(chkPos), 2, 11, bgcolor = color.new(#131722, 10), border_color = color.new(color.gray, 70), border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+cSz = chkSize == "Tiny" ? size.tiny : chkSize == "Normal" ? size.normal : size.small
 
 f_row(int r, string tf, int t, string e, float lv) =>
     table.cell(dash, 0, r, tf, text_color = color.white, text_size = size.small)
     table.cell(dash, 1, r, f_bias(t), text_color = color.white, bgcolor = color.new(f_col(t), 30), text_size = size.small)
     table.cell(dash, 2, r, e, text_color = color.silver, text_size = size.small)
-    table.cell(dash, 3, r, na(lv) ? "—" : str.tostring(lv, format.mintick), text_color = color.silver, text_size = size.small)
+    table.cell(dash, 3, r, f_px(lv), text_color = color.silver, text_size = size.small)
+
+// state: 1 pass, 0 pending, -1 fail
+f_step(int r, string name, int state, string detail) =>
+    string mark = state == 1 ? "✅ " : state == 0 ? "⏳ " : "❌ "
+    color  c    = state == 1 ? bullC : state == 0 ? color.orange : bearC
+    table.cell(chk, 0, r, mark + name, text_color = c, text_size = cSz, text_halign = text.align_left)
+    table.cell(chk, 1, r, detail, text_color = color.silver, text_size = cSz, text_halign = text.align_left)
 
 if barstate.islast
     table.cell(dash, 0, 0, "TF", text_color = color.gray, text_size = size.small)
@@ -216,13 +401,36 @@ if barstate.islast
     f_row(1, "Daily", dTr, dEv, dLv)
     f_row(2, "H4", h4Tr, h4Ev, h4Lv)
     f_row(3, timeframe.period, cTr, cEv, cLv)
-    string verdict = dTr == 1 and h4Tr == 1 ? "D + H4 BULLISH → buys at bull OBs" : dTr == -1 and h4Tr == -1 ? "D + H4 BEARISH → sells at bear OBs" : "D / H4 DISAGREE → wait for alignment"
-    color vCol = dTr == 1 and h4Tr == 1 ? bullC : dTr == -1 and h4Tr == -1 ? bearC : color.orange
-    table.cell(dash, 0, 4, verdict, text_color = color.white, bgcolor = color.new(vCol, 25), text_size = size.small)
-    table.merge_cells(dash, 0, 4, 3, 4)
+    int    al   = dTr == h4Tr ? dTr : 0
+    string vTxt = al == 1 ? "buys at bull OBs" : al == -1 ? "sells at bear OBs" : "wait for alignment"
+    color  vCol = al == 1 ? bullC : al == -1 ? bearC : color.orange
+    table.cell(dash, 0, 4, "D + H4", text_color = color.white, bgcolor = color.new(vCol, 25), text_size = size.small)
+    table.cell(dash, 1, 4, al == 0 ? "MIXED" : f_bias(al), text_color = color.white, bgcolor = color.new(vCol, 25), text_size = size.small)
+    table.cell(dash, 2, 4, vTxt, text_color = color.white, bgcolor = color.new(vCol, 25), text_size = size.small)
+    table.cell(dash, 3, 4, "", bgcolor = color.new(vCol, 25), text_size = size.small)
+    if showCheck
+        string side = dir == -1 ? "SELL" : dir == 1 ? "BUY" : "—"
+        string half = dir == -1 ? "premium" : "discount"
+        string fin  = not okBias ? "no trade: bias mixed" : allPass ? "ALL PASS: your call" : not okLoc ? "wait for " + half : not okSweep ? "wait for sweep" : not okDisp ? "wait for impulse" : not okPOI ? "wait for POI" : not okShift ? "wait for CHoCH" : not okR ? "skip: R:R < " + str.tostring(minR) : not okSize ? "skip: stop too wide" : "no trade: target hit"
+        color  fCol = allPass ? (dir == -1 ? bearC : bullC) : not okBias or not okTarget or not okR or not okSize ? color.gray : color.orange
+        table.cell(chk, 0, 0, "SMC " + side, text_color = color.white, bgcolor = color.new(fCol, 25), text_size = cSz, text_halign = text.align_left)
+        table.cell(chk, 1, 0, fin, text_color = color.white, bgcolor = color.new(fCol, 25), text_size = cSz, text_halign = text.align_left)
+        f_step(1,  "Bias",     okBias ? 1 : -1,   okBias ? "D+H4 " + (dir == -1 ? "bear" : "bull") : "mixed")
+        f_step(2,  "Target",   okTarget ? 1 : -1, f_px(target) + (okTarget ? "" : " hit"))
+        f_step(3,  "Sweep",    okSweep ? 1 : 0,   okSweep ? str.tostring(bar_index - swBar) + " bars ago" : "waiting")
+        f_step(4,  "Impulse",  okDisp ? 1 : 0,    okDisp ? "yes" : "waiting")
+        f_step(5,  "Location", okLoc ? 1 : -1,    okLoc ? half : "wrong half")
+        f_step(6,  "POI",      okPOI ? 1 : 0,     okPOI ? f_px(pBot) + "–" + f_px(pTop) + (inPOI ? " IN" : "") : "none yet")
+        f_step(7,  "CHoCH",    okShift ? 1 : 0,   okShift ? "done" : "M15/M5 in POI")
+        f_step(8,  "R:R",      okR ? 1 : -1,      na(rr) ? "—" : str.tostring(rr, "#.#") + "R · SL " + f_px(stop))
+        f_step(9,  "Size",     okSize ? 1 : -1,   na(maxLot) ? "—" : "0.01=$" + str.tostring(per001, "#") + (okSize ? " · max " + str.tostring(maxLot, "#.##") : " TOO WIDE"))
+        table.cell(chk, 0, 10, "Range " + rngTF + " EQ", text_color = color.gray, text_size = cSz, text_halign = text.align_left)
+        table.cell(chk, 1, 10, f_px(eq), text_color = color.gray, text_size = cSz, text_halign = text.align_left)
 
 // ── Alerts ──
 int align = dTr == h4Tr ? dTr : 0
 alertcondition(cBu and cEv == "CHoCH", "Bullish CHoCH (chart TF)", "Bullish CHoCH on {{ticker}} {{interval}}: new bull OB marked")
 alertcondition(cBe and cEv == "CHoCH", "Bearish CHoCH (chart TF)", "Bearish CHoCH on {{ticker}} {{interval}}: new bear OB marked")
 alertcondition(align != align[1] and align != 0, "D + H4 aligned", "Daily and H4 bias now agree on {{ticker}}")
+alertcondition(allPass and not allPass[1], "Checklist ALL PASS", "SMC checklist all pass on {{ticker}} {{interval}}: check the POI")
+alertcondition(inPOI and not inPOI[1], "Price entered POI", "Price entered the checklist POI on {{ticker}} {{interval}}: drop to M15 / M5 for a CHoCH")

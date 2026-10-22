@@ -1,0 +1,373 @@
+//@version=6
+// TWI Manas Setup - built 2026-10-04 from JR_MANAS' six sketches (3 sell + 3 buy). Not a copy of any vendor code.
+// The chain in every sketch: EXTREME (a Sweep of the prior swing, a Double top/bottom, or a Plain high/low)
+//   -> BOS (a close through the swing that started the move) -> the market takes the internal liquidity "$$"
+//   (the first bounce's swing) -> price returns to the ENTRY zone at the extreme -> continuation.
+// Sell = the sketch as drawn; buy = its mirror. One setup per side at a time. Swings are confirmed pivots (no repaint).
+// Zone = the extreme candle (high down to its low, capped at ZoneATR x ATR). Entry = a limit at the zone's near edge
+// (or its middle). Stop = beyond the zone + buffer. Target = the lowest low since the extreme ("Structure") or 1.5/2/3R.
+// Scorecard is in R and split by origin type. UNVALIDATED: no edge is claimed until a long sample says so.
+// v3 (2026-10-04): "$$ required" now defaults OFF (as drawn it lost on all 5 backtest sets; the off setting was chosen AFTER seeing that,
+// so it is a lead, not proof). Table text shortened to fit a phone. Existing chart instances keep their own saved inputs.
+indicator("TWI Manas Setup", shorttitle = "TWI Manas", overlay = true, max_boxes_count = 120, max_lines_count = 300, max_labels_count = 300)
+
+grpS = "Structure"
+pivL = input.int(3, "Swing bars left", minval = 1, group = grpS)
+pivR = input.int(3, "Swing bars right (confirmation delay)", minval = 1, group = grpS)
+eqTol = input.float(0.3, "Double top/bottom tolerance (x ATR)", minval = 0.0, step = 0.05, group = grpS)
+useSweep = input.bool(true, "Origin: Sweep (takes the prior swing, closes back)", group = grpS)
+useDouble = input.bool(true, "Origin: Double top / bottom", group = grpS)
+usePlain = input.bool(true, "Origin: Plain (no sweep, no double)", group = grpS)
+needLiq = input.bool(false, "Require the $$ liquidity grab first (off = enter on the first zone retest)", group = grpS)
+maxBars = input.int(150, "Setup expires N bars after the extreme", minval = 10, group = grpS)
+dirIn = input.string("Both", "Direction", options = ["Both", "Sell only", "Buy only"], group = grpS)
+
+grpT = "Zone and trade"
+zoneATR = input.float(1.5, "Max zone height (x ATR)", minval = 0.2, step = 0.1, group = grpT)
+entryAt = input.string("Zone proximal edge", "Entry at", options = ["Zone proximal edge", "Zone middle"], group = grpT)
+slBuf = input.float(0.25, "Stop buffer beyond the zone (x ATR)", minval = 0.0, step = 0.05, group = grpT)
+tpMode = input.string("Structure", "Target", options = ["Structure", "1.5R", "2R", "3R"], group = grpT)
+minRR = input.float(1.0, "Skip setups with RR below", minval = 0.5, step = 0.25, group = grpT)
+maxHold = input.int(300, "Close a filled trade after N bars", minval = 10, group = grpT)
+
+grpD = "Display"
+showCancelled = input.bool(false, "Keep cancelled setups as faded zones", group = grpD)
+showTable = input.bool(true, "Scorecard table", group = grpD)
+tblPos = input.string("Bottom Right", "Table position", options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group = grpD)
+
+type Setup
+    int st = 0
+    int kind = 0
+    float lastSH = na
+    int lastSHi = na
+    float lastSL = na
+    int lastSLi = na
+    float ext = na
+    int extI = na
+    float zTop = na
+    float zBot = na
+    float lvl = na
+    int lvlI = na
+    int bosI = na
+    float liq = na
+    int liqI = na
+    float lowest = na
+    float entry = na
+    float sl = na
+    float tp = na
+    float risk = na
+    float rr = na
+    int fillI = na
+    string evt = ""
+    box bx = na
+    label lz = na
+    line lEnt = na
+    line lSl = na
+    line lTp = na
+
+type Stats
+    array<int> n
+    array<int> w
+    array<float> g
+    array<float> l
+    array<int> fun
+
+f_kindTxt(int k) =>
+    k == 1 ? "Sweep" : k == 2 ? "Double" : "Plain"
+
+f_clear(Setup s, bool fade, string why) =>
+    if fade and not na(s.bx)
+        box.set_bgcolor(s.bx, color.new(color.gray, 92))
+        box.set_border_color(s.bx, color.new(color.gray, 65))
+        box.set_right(s.bx, bar_index)
+        if not na(s.lz)
+            label.set_text(s.lz, "x " + why)
+            label.set_color(s.lz, color.new(color.gray, 70))
+    else
+        if not na(s.bx)
+            box.delete(s.bx)
+        if not na(s.lz)
+            label.delete(s.lz)
+    if not na(s.lEnt)
+        line.delete(s.lEnt)
+    if not na(s.lSl)
+        line.delete(s.lSl)
+    if not na(s.lTp)
+        line.delete(s.lTp)
+    s.st := 0
+    s.kind := 0
+    s.ext := na
+    s.extI := na
+    s.zTop := na
+    s.zBot := na
+    s.lvl := na
+    s.lvlI := na
+    s.bosI := na
+    s.liq := na
+    s.liqI := na
+    s.lowest := na
+    s.entry := na
+    s.sl := na
+    s.tp := na
+    s.risk := na
+    s.rr := na
+    s.fillI := na
+    s.bx := na
+    s.lz := na
+    s.lEnt := na
+    s.lSl := na
+    s.lTp := na
+
+f_resolve(Setup s, int d, float r, string why, Stats T) =>
+    int gS = d == 1 ? 1 : 2
+    int gK = 2 + s.kind
+    for g in array.from(0, gS, gK)
+        T.n.set(g, T.n.get(g) + 1)
+        if r > 0
+            T.w.set(g, T.w.get(g) + 1)
+            T.g.set(g, T.g.get(g) + r)
+        else
+            T.l.set(g, T.l.get(g) - r)
+    if not na(s.lEnt)
+        line.set_x2(s.lEnt, bar_index)
+    if not na(s.lSl)
+        line.set_x2(s.lSl, bar_index)
+    if not na(s.lTp)
+        line.set_x2(s.lTp, bar_index)
+    if not na(s.bx)
+        box.set_right(s.bx, bar_index)
+    label.new(bar_index, d == 1 ? low : high, why + " " + (r >= 0 ? "+" : "") + str.tostring(math.round(r, 2)) + "R",
+         style = d == 1 ? label.style_label_up : label.style_label_down, color = r > 0 ? color.new(color.green, 15) : color.new(color.red, 15),
+         textcolor = color.white, size = size.tiny)
+    s.evt := (r > 0 ? "WIN " : "LOSS ") + str.tostring(math.round(r, 2)) + "R"
+    s.st := 0
+    s.kind := 0
+    s.ext := na
+    s.extI := na
+    s.zTop := na
+    s.zBot := na
+    s.lvl := na
+    s.lvlI := na
+    s.bosI := na
+    s.liq := na
+    s.liqI := na
+    s.lowest := na
+    s.entry := na
+    s.sl := na
+    s.tp := na
+    s.risk := na
+    s.rr := na
+    s.fillI := na
+    s.bx := na
+    s.lz := na
+    s.lEnt := na
+    s.lSl := na
+    s.lTp := na
+
+// One side of the model, written once in "D-space": for a sell d = 1 (prices as they are), for a buy d = -1 (prices
+// negated), so the sell logic reads as the buy logic's mirror image. Drawn prices are converted back with d * price.
+f_step(Setup s, int d, float phD, float plD, float atrV, Stats T) =>
+    float hiD = d == 1 ? high : -low
+    float loD = d == 1 ? low : -high
+    float clD = d * close
+    color zc = d == 1 ? color.red : color.green
+    if not na(plD)
+        s.lastSL := plD
+        s.lastSLi := bar_index - pivR
+    if not na(phD)
+        float prevH = s.lastSH
+        s.lastSH := phD
+        s.lastSHi := bar_index - pivR
+        bool arm = s.st == 0 or (s.st == 1 and phD > s.ext)
+        if arm and not na(s.lastSL)
+            float extLo = d == 1 ? low[pivR] : -high[pivR]
+            float zb = math.max(extLo, phD - zoneATR * atrV)
+            bool isDbl = not na(prevH) and math.abs(phD - prevH) <= eqTol * atrV
+            bool isSwp = not na(prevH) and phD > prevH and clD < prevH
+            int kind = isDbl ? 2 : isSwp ? 1 : 3
+            bool okKind = (kind == 1 and useSweep) or (kind == 2 and useDouble) or (kind == 3 and usePlain)
+            if okKind and s.lastSL < zb and s.lastSLi < bar_index - pivR
+                if s.st == 1
+                    f_clear(s, false, "")
+                s.st := 1
+                s.kind := kind
+                s.ext := phD
+                s.extI := bar_index - pivR
+                s.zTop := phD
+                s.zBot := zb
+                s.lvl := s.lastSL
+                s.lvlI := s.lastSLi
+                float lw = loD
+                for k = 1 to pivR
+                    lw := math.min(lw, d == 1 ? low[k] : -high[k])
+                s.lowest := lw
+                T.fun.set(0, T.fun.get(0) + 1)
+                float tp0 = math.max(d * s.zTop, d * s.zBot)
+                float bt0 = math.min(d * s.zTop, d * s.zBot)
+                s.bx := box.new(s.extI, tp0, bar_index, bt0, border_color = color.new(zc, 30), bgcolor = color.new(zc, 85))
+                s.lz := label.new(s.extI, d == 1 ? tp0 : bt0, (d == 1 ? "SELL " : "BUY ") + f_kindTxt(kind), style = d == 1 ? label.style_label_down : label.style_label_up,
+                     color = color.new(zc, 25), textcolor = color.white, size = size.tiny)
+                // the break of structure may already have happened inside the confirmation window
+                int bosK = -1
+                for k = pivR - 1 to 0
+                    if d * close[k] < s.lvl
+                        bosK := k
+                        break
+                if bosK >= 0
+                    s.st := 2
+                    s.bosI := bar_index - bosK
+                    T.fun.set(1, T.fun.get(1) + 1)
+                    label.new(s.bosI, d * s.lvl, "BOS", style = d == 1 ? label.style_label_up : label.style_label_down, color = color.new(color.gray, 40), textcolor = color.white, size = size.tiny)
+                    line.new(s.lvlI, d * s.lvl, s.bosI, d * s.lvl, color = color.new(color.gray, 20), style = line.style_dashed)
+
+    if s.st == 1
+        s.lowest := math.min(s.lowest, loD)
+        if clD < s.lvl
+            s.st := 2
+            s.bosI := bar_index
+            T.fun.set(1, T.fun.get(1) + 1)
+            label.new(bar_index, d * s.lvl, "BOS", style = d == 1 ? label.style_label_up : label.style_label_down, color = color.new(color.gray, 40), textcolor = color.white, size = size.tiny)
+            line.new(s.lvlI, d * s.lvl, bar_index, d * s.lvl, color = color.new(color.gray, 20), style = line.style_dashed)
+        else if clD > s.zTop
+            T.fun.set(5, T.fun.get(5) + 1)
+            f_clear(s, showCancelled, "closed past the extreme")
+        else if bar_index - s.extI > maxBars
+            T.fun.set(5, T.fun.get(5) + 1)
+            f_clear(s, showCancelled, "expired")
+
+    if s.st == 2
+        s.lowest := math.min(s.lowest, loD)
+        if not na(phD) and (bar_index - pivR) > s.bosI and phD < s.zBot
+            if na(s.liq) or phD >= s.liq
+                s.liqI := bar_index - pivR
+            s.liq := na(s.liq) ? phD : math.max(s.liq, phD)
+        bool taken = false
+        if not needLiq
+            taken := true
+        else if not na(s.liq) and hiD > s.liq
+            taken := true
+        if taken
+            s.st := 3
+            T.fun.set(2, T.fun.get(2) + 1)
+            if needLiq and not na(s.liq)
+                line.new(s.liqI, d * s.liq, bar_index, d * s.liq, color = color.new(color.yellow, 10), style = line.style_dotted)
+                label.new(bar_index, d * s.liq, "$$", style = d == 1 ? label.style_label_down : label.style_label_up, color = color.new(color.yellow, 20), textcolor = color.black, size = size.tiny)
+            s.evt := "READY"
+        else if clD > s.zTop
+            T.fun.set(5, T.fun.get(5) + 1)
+            f_clear(s, showCancelled, "closed past the extreme")
+        else if needLiq and na(s.liq) and hiD >= s.zBot
+            T.fun.set(5, T.fun.get(5) + 1)
+            f_clear(s, showCancelled, "zone tapped, no $$")
+        else if bar_index - s.extI > maxBars
+            T.fun.set(5, T.fun.get(5) + 1)
+            f_clear(s, showCancelled, "expired")
+
+    if s.st == 3
+        s.lowest := math.min(s.lowest, loD)
+        float entryD = entryAt == "Zone middle" ? (s.zTop + s.zBot) / 2 : s.zBot
+        if hiD >= entryD
+            float slD = s.zTop + slBuf * atrV
+            float riskD = slD - entryD
+            float tpD = tpMode == "Structure" ? s.lowest : tpMode == "1.5R" ? entryD - 1.5 * riskD : tpMode == "2R" ? entryD - 2.0 * riskD : entryD - 3.0 * riskD
+            float rrD = riskD > 0 ? (entryD - tpD) / riskD : na
+            if na(rrD) or rrD < minRR
+                T.fun.set(4, T.fun.get(4) + 1)
+                f_clear(s, showCancelled, "RR too low")
+            else
+                s.st := 4
+                s.entry := entryD
+                s.sl := slD
+                s.tp := tpD
+                s.risk := riskD
+                s.rr := rrD
+                s.fillI := bar_index
+                T.fun.set(3, T.fun.get(3) + 1)
+                s.lEnt := line.new(bar_index, d * entryD, bar_index + 1, d * entryD, color = color.new(color.gray, 10))
+                s.lSl := line.new(bar_index, d * slD, bar_index + 1, d * slD, color = color.new(color.red, 10))
+                s.lTp := line.new(bar_index, d * tpD, bar_index + 1, d * tpD, color = color.new(color.green, 10))
+                s.evt := "FILL"
+                if hiD >= slD
+                    f_resolve(s, d, -1.0, "LOSS", T)
+        else if bar_index - s.extI > maxBars
+            T.fun.set(5, T.fun.get(5) + 1)
+            f_clear(s, showCancelled, "expired")
+
+    if s.st == 4 and s.fillI < bar_index
+        if not na(s.bx)
+            box.set_right(s.bx, bar_index)
+        if not na(s.lEnt)
+            line.set_x2(s.lEnt, bar_index + 1)
+        if not na(s.lSl)
+            line.set_x2(s.lSl, bar_index + 1)
+        if not na(s.lTp)
+            line.set_x2(s.lTp, bar_index + 1)
+        if hiD >= s.sl
+            f_resolve(s, d, -1.0, "LOSS", T)
+        else if loD <= s.tp
+            f_resolve(s, d, s.rr, "WIN", T)
+        else if bar_index - s.fillI > maxHold
+            f_resolve(s, d, (s.entry - clD) / s.risk, "TIME", T)
+
+    if s.st >= 1 and s.st <= 3 and not na(s.bx)
+        box.set_right(s.bx, bar_index)
+
+// ---------------- Run ----------------
+atr = ta.atr(14)
+ph = ta.pivothigh(high, pivL, pivR)
+pl = ta.pivotlow(low, pivL, pivR)
+float phB = na(pl) ? na : -pl
+float plB = na(ph) ? na : -ph
+
+var Setup S = Setup.new()
+var Setup B = Setup.new()
+var Stats T = Stats.new(array.new_int(6, 0), array.new_int(6, 0), array.new_float(6, 0.0), array.new_float(6, 0.0), array.new_int(6, 0))
+var int firstT = time
+
+S.evt := ""
+B.evt := ""
+if dirIn != "Buy only"
+    f_step(S, 1, ph, pl, atr, T)
+if dirIn != "Sell only"
+    f_step(B, -1, phB, plB, atr, T)
+
+if S.evt != ""
+    alert("TWI Manas SELL " + S.evt + " on " + syminfo.ticker + " " + timeframe.period, alert.freq_once_per_bar_close)
+if B.evt != ""
+    alert("TWI Manas BUY " + B.evt + " on " + syminfo.ticker + " " + timeframe.period, alert.freq_once_per_bar_close)
+
+// ---------------- Scorecard ----------------
+tPos = tblPos == "Top Left" ? position.top_left : tblPos == "Top Right" ? position.top_right : tblPos == "Bottom Left" ? position.bottom_left : position.bottom_right
+var table tb = table.new(tPos, 2, 11, border_width = 1)
+f_row(int g) =>
+    int n = T.n.get(g)
+    float tot = T.g.get(g) - T.l.get(g)
+    str.tostring(n) + " tr  " + (n > 0 ? str.tostring(math.round(100.0 * T.w.get(g) / n, 0)) + "%" : "-") + "  " + str.tostring(math.round(tot, 1)) + "R"
+f_stateTxt(Setup s) =>
+    s.st == 0 ? "idle" : s.st == 1 ? "armed" : s.st == 2 ? "BOS done" : s.st == 3 ? "READY" : "in trade"
+if showTable and barstate.islast
+    float totAll = T.g.get(0) - T.l.get(0)
+    float pf = T.l.get(0) > 0 ? T.g.get(0) / T.l.get(0) : na
+    color bg = color.new(color.black, 30)
+    table.cell(tb, 0, 0, "TWI Manas Setup", text_color = color.white, text_size = size.small, bgcolor = color.new(color.black, 20))
+    table.cell(tb, 1, 0, "sell: " + f_stateTxt(S) + " | buy: " + f_stateTxt(B), text_color = color.white, text_size = size.small, bgcolor = color.new(color.black, 20))
+    table.cell(tb, 0, 1, "All trades", text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 1, 1, f_row(0) + "  PF " + (na(pf) ? "-" : str.tostring(math.round(pf, 2))), text_color = totAll >= 0 ? color.lime : color.red, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 0, 2, "Sell setups", text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 1, 2, f_row(1), text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 0, 3, "Buy setups", text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 1, 3, f_row(2), text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 0, 4, "Origin: Sweep", text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 1, 4, f_row(3), text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 0, 5, "Origin: Double", text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 1, 5, f_row(4), text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 0, 6, "Origin: Plain", text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 1, 6, f_row(5), text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 0, 7, "Armed>BOS>$$>Fill", text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 1, 7, str.tostring(T.fun.get(0)) + " > " + str.tostring(T.fun.get(1)) + " > " + str.tostring(T.fun.get(2)) + " > " + str.tostring(T.fun.get(3)), text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 0, 8, "Dropped", text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 1, 8, "RR " + str.tostring(T.fun.get(4)) + "  cancelled " + str.tostring(T.fun.get(5)), text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 0, 9, "History since", text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 1, 9, str.format_time(firstT, "yyyy-MM-dd") + " (" + str.tostring(bar_index + 1) + " bars)", text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 0, 10, "Status", text_color = color.white, text_size = size.tiny, bgcolor = bg)
+    table.cell(tb, 1, 10, needLiq ? "UNVALIDATED ($$ required)" : "UNVALIDATED", text_color = color.orange, text_size = size.tiny, bgcolor = bg)

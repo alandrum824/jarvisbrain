@@ -139,3 +139,44 @@ Source: Adam's Instagram frames + the official "STRIKE NY Session Checklist" PDF
 | Fixed 3R | +66.1R, 3/5 (2022 −5.6, 2026 −6.2) | −69.2R | +16.7R, 5/7 |
 
 **The claimed 80% / 5R does not reproduce as written** (29–33% wins, 39–84 trades in 5–7 years). **But one strong lead: NAS100, the STRIKE entry with the target at the next 4H level and no RR filter, is positive in all 5 years** (+2.3 / +5.0 / +21.6 / +15.5 / +6.5R; avg win 0.8R, i.e. many small wins). Gold fails badly in every variant. Next step if pursued: a real MT5 EA + tester confirmation on NAS100 (the min lot is 0.01 = $0.10/pt; check the stop sizes vs a $200 account).
+
+## Pat's "15 Minute ORB" video: strength-based entry (2026-10-11)
+Video: youtu.be/deymRD3kSD0 (Trade with Pat). The range is the 09:30 NY 15-min candle. Then an M5 close breaks it. Entry depends on how strong the break is:
+- **Strong** break: buy at the range high.
+- **Medium** break: buy at the midline.
+- **Weak** break: buy at the demand zone below 50%.
+
+The stop goes under the range low / demand, the target is the recent high, and there are no entries after 12:00 NY. The video shows no backtest. It names NASDAQ, not gold, and links to a VIP group and a broker affiliate.
+
+Replay: `pat_orb_strength_research.py`, rules fixed in advance. Strength = (M5 close beyond the edge) ÷ range size: strong ≥ 0.5, medium 0.2–0.5, weak < 0.2. Fills on M1, H1 swing target ≥ 1R, coin-flip control (50 runs).
+
+| Market | Trades | R | R/tr | Win | Years + | Strong | Medium | Weak |
+|---|---|---|---|---|---|---|---|---|
+| Gold 2020–26 | 748 | **−168.0** | −0.225 | 27% | 1/7 | −0.07R/tr | −0.16 | −0.32 |
+| NAS100 2022–26 | 448 | **−35.0** | −0.078 | 30% | 2/5 | **+0.31R/tr (47 tr)** | **+0.14 (145)** | −0.27 (256) |
+
+**Read:**
+- **No edge as taught.** The deeper the pullback entry, the worse it does, which is adverse selection: real breakouts rarely pull back that far.
+- **Coin-flip "beats" don't count.** Gold beat 100% and NAS100 98%, but only because the random version loses even more.
+- **One lead, not tested out of sample.** On NAS100, strong and medium breaks alone made +34.7R over 192 trades. That split was found after seeing the data, so it needs fresh data before it counts.
+
+## Adam's gold "9:00 AM candle" model (2026-10-11)
+Adam's rule: mark the first M15 candle at 9:00 → switch to M5 → wait for a break and a retest → enter, stop below the zone, target the previous swing high. His two chart examples (gold, Oct 7 and Oct 8) match the **12:00 NY candle**, which is 9:00 AM Pacific.
+
+Replay: `gold_9am_retest_research.py`, AAAFx gold M1 2020–26. Rules were fixed in advance:
+- Break = the first M5 close beyond the candle.
+- Retest = price touches the broken edge, then an M5 candle closes back beyond it. Entry at the next open (the "confirm" variant; "limit" = a limit order at the edge).
+- SL = the other side of the candle.
+- TP = the nearest H1 swing ≥ 1R away, or a fixed 2R.
+- 50 coin-flip control runs.
+
+| Candle | Swing target (confirm) | Fixed 2R (confirm) | Limit at edge |
+|---|---|---|---|
+| **12:00 NY (Adam's)** | **−104.2R, PF 0.87, 3/7 yrs, beats coin 8%** | −148.0R, 1/7 | −208R / −206R, 0/7 |
+| 9:30 NY (Pat) | −2.7R, PF 1.00, 2/7, beats coin 68% | +39.8R, PF 1.05, 4/7, 80% | −42R / −4R |
+| 9:00 NY | +26.0R, PF 1.04, 4/7, 72% | −4.5R | −24R / −54R |
+
+**Read:**
+- **The noon-NY candle model loses clearly, worse than a coin flip.** The two winning examples were real, but they were cherry-picks.
+- The 9:00 and 9:30 NY versions are about breakeven, and none of them beats the coin flip at 95%.
+- Limit entries at the edge are worst everywhere, the same adverse selection as the other pullback entries.

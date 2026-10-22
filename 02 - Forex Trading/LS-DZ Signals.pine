@@ -1,0 +1,405 @@
+//@version=6
+// =============================================================================
+// LS-DZ Signals — buy/sell + SL/TP levels (UNVALIDATED)
+// -----------------------------------------------------------------------------
+// Signal model (liquidity sweep into demand/supply):
+//   LONG:  buy-side liquidity swept (wick through, close back) -> price taps
+//          an active demand zone -> BUY.
+//          SL  = demand zone bottom minus ATR buffer  (invalidation)
+//          TP1 = the swept liquidity level            (first objective)
+//          TP2 = entry + TP2 x risk                    (runner)
+//   SHORT: mirrored (supply zone, equal lows, SL above, TPs below).
+//
+// Quality gate: signals need min R:R to TP1. One active signal per side;
+// lines extend until TP2 or SL, then freeze with an outcome tag (+R / -1R).
+// Non-repainting (confirmed pivots only). Indicator only — no orders.
+// UNVALIDATED: visual model, not backtested. Validate before live use.
+// v3 (2026-10-11): decluttered - tiny swing triangles, only the newest zones
+// drawn, swept liquidity lines stop at the sweep bar, short extensions.
+// =============================================================================
+indicator("LS-DZ Signals", shorttitle="LS-DZ Sig", overlay=true,
+     max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+pivotLeft   = input.int(5, "Pivot left bars", minval=1, group="Structure")
+pivotRight  = input.int(5, "Pivot right bars", minval=1, group="Structure")
+atrLen      = input.int(14, "ATR length", minval=1, group="Structure")
+dispMult    = input.float(1.5, "Displacement (x ATR)", minval=0.2, step=0.1, group="Zones",
+     tooltip="Min impulsive move away from the pivot needed to validate a zone")
+eqTolMult   = input.float(0.15, "Equal high/low tolerance (x ATR)", minval=0.01, step=0.01, group="Liquidity",
+     tooltip="How close two swing points must be to count as one liquidity level")
+zoneExtend  = input.int(10, "Zone / line extension (bars)", minval=0, group="Display")
+maxZones    = input.int(3, "Zones drawn per side", minval=1, group="Display",
+     tooltip="Display only - older zones still count for signals")
+sweepLookbk = input.int(30, "Sweep memory (bars)", minval=1, group="Signals",
+     tooltip="How long after a sweep a zone tap still counts")
+slBufMult   = input.float(0.2, "SL buffer (x ATR)", minval=0, step=0.05, group="Signals",
+     tooltip="Extra room beyond the zone edge before the stop")
+tp2RR       = input.float(2.0, "TP2 (x risk)", minval=0.5, step=0.25, group="Signals")
+minRR       = input.float(1.5, "Min R:R to TP1", minval=0.1, step=0.1, group="Signals",
+     tooltip="Signals below this reward:risk to TP1 are skipped")
+sigExtend   = input.int(30, "Signal line extension (bars)", minval=5, group="Display")
+showSwings  = input.bool(true, "Swing markers", group="Display")
+showZones   = input.bool(true, "Zones", group="Display")
+showLiq     = input.bool(true, "Liquidity levels", group="Display")
+showSweeps  = input.bool(true, "Sweep markers", group="Display")
+showEntries = input.bool(true, "Entry signals", group="Display")
+
+// ── Structure ───────────────────────────────────────────────────────────────
+atr  = ta.atr(atrLen)
+ph   = ta.pivothigh(high, pivotLeft, pivotRight)   // confirmed pivotRight bars late
+pl   = ta.pivotlow(low, pivotLeft, pivotRight)
+pBar = bar_index - pivotRight
+hhR  = ta.highest(high, pivotRight + 1)   // computed every bar (inside an if it reads a stale window)
+llR  = ta.lowest(low, pivotRight + 1)
+
+// small triangles at the swing bar (drawn on confirmation, so no repaint)
+plotshape(showSwings and not na(ph), "Swing high", shape.triangledown, location.abovebar, color.new(color.red, 30), offset=-pivotRight, size=size.tiny)
+plotshape(showSwings and not na(pl), "Swing low", shape.triangleup, location.belowbar, color.new(#089981, 30), offset=-pivotRight, size=size.tiny)
+
+// ── Demand / supply zones ───────────────────────────────────────────────────
+var array<box>   dzBox = array.new<box>()
+var array<float> dzTop = array.new<float>()
+var array<float> dzBot = array.new<float>()
+var array<box>   szBox = array.new<box>()
+var array<float> szTop = array.new<float>()
+var array<float> szBot = array.new<float>()
+
+// display cap: only the newest maxZones boxes stay drawn; older zones still count for signals
+hideOldBoxes(array<box> bx) =>
+    int drawn = 0
+    for k = array.size(bx) - 1 to 0
+        b = array.get(bx, k)
+        if not na(b)
+            drawn += 1
+            if drawn > maxZones
+                box.delete(b)
+                array.set(bx, k, na)
+
+if not na(pl)
+    disp = hhR - pl
+    if disp >= dispMult * atr
+        top = high[pivotRight]
+        array.push(dzTop, top)
+        array.push(dzBot, pl)
+        if showZones
+            array.push(dzBox, box.new(pBar, top, bar_index + zoneExtend, pl,
+                 border_color=color.new(#089981, 40), bgcolor=color.new(#089981, 88)))
+        else
+            array.push(dzBox, na)
+        hideOldBoxes(dzBox)
+
+if not na(ph)
+    disp = ph - llR
+    if disp >= dispMult * atr
+        bot = low[pivotRight]
+        array.push(szTop, ph)
+        array.push(szBot, bot)
+        if showZones
+            array.push(szBox, box.new(pBar, ph, bar_index + zoneExtend, bot,
+                 border_color=color.new(color.red, 40), bgcolor=color.new(color.red, 88)))
+        else
+            array.push(szBox, na)
+        hideOldBoxes(szBox)
+
+dzN = array.size(dzTop)
+if dzN > 0
+    for i = 0 to dzN - 1
+        j = dzN - 1 - i
+        b = array.get(dzBox, j)
+        if not na(b)
+            box.set_right(b, bar_index + zoneExtend)
+        if close < array.get(dzBot, j)
+            if not na(b)
+                box.delete(b)
+            array.remove(dzBox, j)
+            array.remove(dzTop, j)
+            array.remove(dzBot, j)
+
+szN = array.size(szTop)
+if szN > 0
+    for i = 0 to szN - 1
+        j = szN - 1 - i
+        b = array.get(szBox, j)
+        if not na(b)
+            box.set_right(b, bar_index + zoneExtend)
+        if close > array.get(szTop, j)
+            if not na(b)
+                box.delete(b)
+            array.remove(szBox, j)
+            array.remove(szTop, j)
+            array.remove(szBot, j)
+
+// ── Liquidity: equal highs / equal lows ──────────────────────────────────────
+var array<float> rPH = array.new<float>()
+var array<int>   rPHb = array.new<int>()
+var array<float> rPL = array.new<float>()
+var array<int>   rPLb = array.new<int>()
+
+var array<line>  liqL  = array.new<line>()
+var array<float> liqP  = array.new<float>()
+var array<bool>  liqSw = array.new<bool>()
+var array<bool>  liqBuy = array.new<bool>()
+
+addLiqLevel(float px, int fromBar, bool isBuySide) =>
+    if showLiq
+        array.push(liqL, line.new(fromBar, px, bar_index + zoneExtend, px,
+             color=color.new(color.orange, 0), style=line.style_dashed, width=1))
+        label.new(bar_index, px, "Liquidity", style=label.style_none,
+             textcolor=color.new(color.orange, 0), size=size.tiny)
+    else
+        array.push(liqL, na)
+    array.push(liqP, px)
+    array.push(liqSw, false)
+    array.push(liqBuy, isBuySide)
+    if array.size(liqL) > 40
+        old = array.shift(liqL)
+        if not na(old)
+            line.delete(old)
+        array.shift(liqP)
+        array.shift(liqSw)
+        array.shift(liqBuy)
+
+if not na(ph)
+    tol = eqTolMult * atr
+    n   = array.size(rPH)
+    if n > 0
+        for i = 0 to n - 1
+            j    = n - 1 - i
+            oldP = array.get(rPH, j)
+            if math.abs(ph - oldP) <= tol
+                addLiqLevel((ph + oldP) / 2, array.get(rPHb, j), true)
+                break
+    array.push(rPH, ph)
+    array.push(rPHb, pBar)
+    if array.size(rPH) > 6
+        array.shift(rPH)
+        array.shift(rPHb)
+
+if not na(pl)
+    tol = eqTolMult * atr
+    n   = array.size(rPL)
+    if n > 0
+        for i = 0 to n - 1
+            j    = n - 1 - i
+            oldP = array.get(rPL, j)
+            if math.abs(pl - oldP) <= tol
+                addLiqLevel((pl + oldP) / 2, array.get(rPLb, j), false)
+                break
+    array.push(rPL, pl)
+    array.push(rPLb, pBar)
+    if array.size(rPL) > 6
+        array.shift(rPL)
+        array.shift(rPLb)
+
+// ── Sweeps ──────────────────────────────────────────────────────────────────
+var int   lastBuySweep    = na
+var float lastBuySweepPx  = na
+var int   lastSellSweep   = na
+var float lastSellSweepPx = na
+
+nl = array.size(liqL)
+if nl > 0
+    for i = 0 to nl - 1
+        j  = nl - 1 - i
+        ln = array.get(liqL, j)
+        px = array.get(liqP, j)
+        if not array.get(liqSw, j)
+            if not na(ln)
+                line.set_x2(ln, bar_index + zoneExtend)   // only live levels keep extending
+            isBuy = array.get(liqBuy, j)
+            swept = isBuy ? (high > px and close < px) : (low < px and close > px)
+            if swept
+                array.set(liqSw, j, true)
+                if not na(ln)
+                    line.set_color(ln, color.new(color.gray, 50))
+                    line.set_x2(ln, bar_index)            // swept: freeze at the sweep bar
+                if isBuy
+                    lastBuySweep   := bar_index
+                    lastBuySweepPx := px
+                else
+                    lastSellSweep   := bar_index
+                    lastSellSweepPx := px
+                if showSweeps
+                    label.new(bar_index, px, "Sweep", style=label.style_none,
+                         textcolor=color.new(color.gray, 0), size=size.tiny)
+
+// ── Signal engine: entries + SL/TP1/TP2 ─────────────────────────────────────
+var bool  longActive = false
+var float longEntry  = na
+var float longSL     = na
+var float longTP1    = na
+var float longTP2    = na
+var line  longLEntry = na
+var line  longLSL    = na
+var line  longLTP1   = na
+var line  longLTP2   = na
+var label longLBL    = na
+var bool  longTP1Hit = false
+var int   longBar    = na
+
+var bool  shortActive = false
+var float shortEntry  = na
+var float shortSL     = na
+var float shortTP1    = na
+var float shortTP2    = na
+var line  shortLEntry = na
+var line  shortLSL    = na
+var line  shortLTP1   = na
+var line  shortLTP2   = na
+var label shortLBL    = na
+var bool  shortTP1Hit = false
+var int   shortBar    = na
+
+longSig  = false
+shortSig = false
+
+// LONG: sweep, then tap into demand
+if showEntries and not longActive and not na(lastBuySweep) and bar_index - lastBuySweep <= sweepLookbk
+    m      = array.size(dzTop)
+    tapIdx = -1
+    if m > 0
+        for i = 0 to m - 1
+            if low <= array.get(dzTop, i)
+                tapIdx := i
+                break
+    if tapIdx >= 0
+        entry = close
+        sl    = array.get(dzBot, tapIdx) - slBufMult * atr
+        risk  = entry - sl
+        if risk > 0
+            tp1 = (not na(lastBuySweepPx) and lastBuySweepPx > entry) ? lastBuySweepPx : entry + 1.5 * risk
+            rr1 = (tp1 - entry) / risk
+            if rr1 >= minRR
+                tp2 = entry + tp2RR * risk
+                longSig    := true
+                longActive := true
+                longEntry  := entry
+                longSL     := sl
+                longTP1    := tp1
+                longTP2    := tp2
+                longTP1Hit := false
+                longBar    := bar_index
+                lastBuySweep := na
+                longLEntry := line.new(bar_index, entry, bar_index + sigExtend, entry,
+                     color=color.new(color.blue, 0), width=2)
+                longLSL := line.new(bar_index, sl, bar_index + sigExtend, sl,
+                     color=color.new(color.red, 0), width=1)
+                longLTP1 := line.new(bar_index, tp1, bar_index + sigExtend, tp1,
+                     color=color.new(#089981, 0), width=1)
+                longLTP2 := line.new(bar_index, tp2, bar_index + sigExtend, tp2,
+                     color=color.new(#089981, 0), style=line.style_dashed, width=1)
+                longLBL := label.new(bar_index, low,
+                     "BUY " + str.tostring(entry, format.mintick) +
+                     "\nSL " + str.tostring(sl, format.mintick) +
+                     " | TP1 " + str.tostring(tp1, format.mintick) +
+                     " | TP2 " + str.tostring(tp2, format.mintick) +
+                     "\n" + str.tostring(rr1, "#.#") + "R to TP1",
+                     style=label.style_label_up, color=color.new(color.blue, 0),
+                     textcolor=color.white, size=size.small)
+
+// SHORT: mirror
+if showEntries and not shortActive and not na(lastSellSweep) and bar_index - lastSellSweep <= sweepLookbk
+    m      = array.size(szTop)
+    tapIdx = -1
+    if m > 0
+        for i = 0 to m - 1
+            if high >= array.get(szBot, i)
+                tapIdx := i
+                break
+    if tapIdx >= 0
+        entry = close
+        sl    = array.get(szTop, tapIdx) + slBufMult * atr
+        risk  = sl - entry
+        if risk > 0
+            tp1 = (not na(lastSellSweepPx) and lastSellSweepPx < entry) ? lastSellSweepPx : entry - 1.5 * risk
+            rr1 = (entry - tp1) / risk
+            if rr1 >= minRR
+                tp2 = entry - tp2RR * risk
+                shortSig    := true
+                shortActive := true
+                shortEntry  := entry
+                shortSL     := sl
+                shortTP1    := tp1
+                shortTP2    := tp2
+                shortTP1Hit := false
+                shortBar    := bar_index
+                lastSellSweep := na
+                shortLEntry := line.new(bar_index, entry, bar_index + sigExtend, entry,
+                     color=color.new(color.blue, 0), width=2)
+                shortLSL := line.new(bar_index, sl, bar_index + sigExtend, sl,
+                     color=color.new(color.red, 0), width=1)
+                shortLTP1 := line.new(bar_index, tp1, bar_index + sigExtend, tp1,
+                     color=color.new(#F23645, 0), width=1)
+                shortLTP2 := line.new(bar_index, tp2, bar_index + sigExtend, tp2,
+                     color=color.new(#F23645, 0), style=line.style_dashed, width=1)
+                shortLBL := label.new(bar_index, high,
+                     "SELL " + str.tostring(entry, format.mintick) +
+                     "\nSL " + str.tostring(sl, format.mintick) +
+                     " | TP1 " + str.tostring(tp1, format.mintick) +
+                     " | TP2 " + str.tostring(tp2, format.mintick) +
+                     "\n" + str.tostring(rr1, "#.#") + "R to TP1",
+                     style=label.style_label_down, color=color.new(color.blue, 0),
+                     textcolor=color.white, size=size.small)
+
+// manage open signals: extend, tag TP1, close out on TP2/SL (from the bar after entry - the entry bar's own range isn't a result)
+if longActive and bar_index > longBar
+    line.set_x2(longLEntry, bar_index + sigExtend)
+    line.set_x2(longLSL, bar_index + sigExtend)
+    line.set_x2(longLTP1, bar_index + sigExtend)
+    line.set_x2(longLTP2, bar_index + sigExtend)
+    if not longTP1Hit and high >= longTP1
+        longTP1Hit := true
+        line.set_color(longLTP1, color.new(color.gray, 0))
+    slHit = low <= longSL
+    if slHit
+        label.new(bar_index, longSL, "✗ SL -1R", style=label.style_label_left,
+             color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+        line.delete(longLEntry)
+        line.delete(longLSL)
+        line.delete(longLTP1)
+        line.delete(longLTP2)
+        label.delete(longLBL)
+        longActive := false
+    else if high >= longTP2
+        label.new(bar_index, longTP2, "✓ TP2 +" + str.tostring(tp2RR, "#.#") + "R",
+             style=label.style_label_left, color=color.new(#089981, 0),
+             textcolor=color.white, size=size.small)
+        line.delete(longLEntry)
+        line.delete(longLSL)
+        line.delete(longLTP1)
+        line.delete(longLTP2)
+        label.delete(longLBL)
+        longActive := false
+
+if shortActive and bar_index > shortBar
+    line.set_x2(shortLEntry, bar_index + sigExtend)
+    line.set_x2(shortLSL, bar_index + sigExtend)
+    line.set_x2(shortLTP1, bar_index + sigExtend)
+    line.set_x2(shortLTP2, bar_index + sigExtend)
+    if not shortTP1Hit and low <= shortTP1
+        shortTP1Hit := true
+        line.set_color(shortLTP1, color.new(color.gray, 0))
+    slHit = high >= shortSL
+    if slHit
+        label.new(bar_index, shortSL, "✗ SL -1R", style=label.style_label_left,
+             color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+        line.delete(shortLEntry)
+        line.delete(shortLSL)
+        line.delete(shortLTP1)
+        line.delete(shortLTP2)
+        label.delete(shortLBL)
+        shortActive := false
+    else if low <= shortTP2
+        label.new(bar_index, shortTP2, "✓ TP2 +" + str.tostring(tp2RR, "#.#") + "R",
+             style=label.style_label_left, color=color.new(#F23645, 0),
+             textcolor=color.white, size=size.small)
+        line.delete(shortLEntry)
+        line.delete(shortLSL)
+        line.delete(shortLTP1)
+        line.delete(shortLTP2)
+        label.delete(shortLBL)
+        shortActive := false
+
+alertcondition(longSig,  title="LS-DZ Long",  message="LS-DZ BUY: sweep + demand tap")
+alertcondition(shortSig, title="LS-DZ Short", message="LS-DZ SELL: sweep + supply tap")

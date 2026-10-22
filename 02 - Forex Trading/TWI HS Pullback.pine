@@ -1,0 +1,301 @@
+//@version=6
+// TWI HS Pullback — head & shoulders (sell) / inverse H&S (buy), entered on the PULLBACK after the right shoulder's push.
+// Same rules as the TWI HS Pullback EA (2026-09-30), from Adam's XAGUSD H1 trade:
+//   pattern = last three confirmed swings (LS, HEAD, RS), head beyond both shoulders, shoulders roughly level,
+//   neckline through the extremes of the two legs, optional prior trend (so it's a reversal);
+//   push = a strong candle off the RS; pullback = a dip that holds beyond the RS and closes as a rejection;
+//   entry at that close, SL beyond the RS (or both shoulders), TP = measured move, breakeven after a close through the neckline.
+// Scorecard: every signal on the chart is played forward bar by bar. If SL and TP are both touched in one bar it counts as a loss.
+indicator("TWI HS Pullback", shorttitle = "TWI HS", overlay = true, max_lines_count = 300, max_labels_count = 300, max_bars_back = 1000)
+
+grpP = "Pattern"
+grpE = "Entry"
+grpX = "Exits"
+grpD = "Display"
+dirIn     = input.string("Both", "Direction", options = ["Both", "Buys only (inverse H&S)", "Sells only (H&S)"], group = grpP)
+pivLen    = input.int(5, "Swing length (bars each side)", minval = 2, group = grpP)
+headMin   = input.float(0.5, "Head beyond shoulders, x ATR", minval = 0, step = 0.1, group = grpP)
+shTol     = input.float(1.5, "Max shoulder gap, x ATR", minval = 0.1, step = 0.1, group = grpP)
+needTrend = input.bool(true, "Require a prior trend (reversal only)", group = grpP)
+priorBars = input.int(40, "Prior-trend lookback bars", minval = 5, group = grpP)
+priorATR  = input.float(1.0, "Prior extreme beyond neckline, x ATR", minval = 0, step = 0.1, group = grpP)
+modeIn    = input.string("Pullback after RS push", "Entry mode", options = ["Pullback after RS push", "Neckline break + retest"], group = grpE)
+impATR    = input.float(1.2, "Push candle body, x ATR", minval = 0.1, step = 0.1, group = grpE)
+pbATR     = input.float(0.3, "Pullback depth, x ATR", minval = 0, step = 0.1, group = grpE)
+rejFrac   = input.float(0.6, "Rejection: close in top/bottom fraction of bar", minval = 0.3, maxval = 1, step = 0.05, group = grpE)
+retTol    = input.float(0.3, "Retest tolerance, x ATR (retest mode)", minval = 0, step = 0.1, group = grpE)
+maxAfter  = input.int(40, "Setup expires N bars after the RS", minval = 5, group = grpE)
+stopIn    = input.string("Beyond right shoulder", "Stop", options = ["Beyond right shoulder", "Beyond both shoulders"], group = grpX)
+bufATR    = input.float(0.1, "Stop buffer, x ATR", minval = 0, step = 0.05, group = grpX)
+tpFac     = input.float(1.0, "Target = measured move x", minval = 0.3, step = 0.1, group = grpX)
+minRR     = input.float(1.5, "Minimum R:R", minval = 0.5, step = 0.1, group = grpX)
+useBE     = input.bool(true, "Stop to breakeven after a close through the neckline", group = grpX)
+showPat   = input.bool(true, "Draw patterns", group = grpD)
+showCard  = input.bool(true, "Show scorecard", group = grpD)
+cardPos   = input.string("Bottom Right", "Scorecard position", options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group = grpD)
+bullC     = input.color(#089981, "Buy color", group = grpD)
+bearC     = input.color(#f23645, "Sell color", group = grpD)
+
+bool allowL = dirIn != "Sells only (H&S)"
+bool allowS = dirIn != "Buys only (inverse H&S)"
+bool pbMode = modeIn == "Pullback after RS push"
+atr = ta.atr(14)
+
+type Setup
+    int   dir
+    bool  armed  = false
+    float ls
+    float hd
+    float rs
+    int   lsI
+    int   hI
+    int   rsI
+    float n1
+    float n2
+    int   n1I
+    int   n2I
+    bool  push   = false
+    float pext
+    bool  neckBr = false
+    int   usedRS = -1
+
+type Trade
+    int   dir    = 0
+    float entry
+    float sl
+    float tp
+    int   eI
+    bool  be     = false
+    float n1
+    float n2
+    int   n1I
+    int   n2I
+    float risk0
+    line  slL
+    line  tpL
+
+var Setup L = Setup.new(1)
+var Setup S = Setup.new(-1)
+var Trade T = Trade.new()
+var array<float> lowP  = array.new<float>()
+var array<int>   lowI  = array.new<int>()
+var array<float> highP = array.new<float>()
+var array<int>   highI = array.new<int>()
+var int   nW = 0
+var int   nL = 0
+var int   nB = 0
+var float sumR = 0.0
+var float grossW = 0.0
+var float grossL = 0.0
+var float peakR = 0.0
+var float maxDD = 0.0
+var int   firstT = time
+
+f_neck(float p1, int i1, float p2, int i2, int idx) => i2 == i1 ? p2 : p1 + (p2 - p1) * (idx - i1) / (i2 - i1)
+
+// ── swings ──
+float pl = ta.pivotlow(low, pivLen, pivLen)
+float ph = ta.pivothigh(high, pivLen, pivLen)
+bool newLow  = not na(pl)
+bool newHigh = not na(ph)
+if newLow
+    array.push(lowP, pl)
+    array.push(lowI, bar_index - pivLen)
+    if array.size(lowP) > 3
+        array.shift(lowP)
+        array.shift(lowI)
+if newHigh
+    array.push(highP, ph)
+    array.push(highI, bar_index - pivLen)
+    if array.size(highP) > 3
+        array.shift(highP)
+        array.shift(highI)
+
+// ── pattern detection on a newly confirmed swing ──
+f_find(Setup s, array<float> P, array<int> I) =>
+    bool ok = false
+    if array.size(P) == 3
+        float ls = array.get(P, 0)
+        float hd = array.get(P, 1)
+        float rs = array.get(P, 2)
+        int lsI = array.get(I, 0)
+        int hI  = array.get(I, 1)
+        int rsI = array.get(I, 2)
+        bool headOk = s.dir == 1 ? (hd < ls - headMin * atr and hd < rs - headMin * atr) : (hd > ls + headMin * atr and hd > rs + headMin * atr)
+        bool shOk   = math.abs(ls - rs) <= shTol * atr
+        bool fits   = bar_index - lsI + priorBars < 990 and lsI - priorBars > 0 and hI - lsI >= 2 and rsI - hI >= 2
+        if headOk and shOk and fits and rsI != s.usedRS
+            float n1 = na
+            int n1I = na
+            for k = bar_index - hI + 1 to bar_index - lsI - 1
+                float v = s.dir == 1 ? high[k] : low[k]
+                if na(n1) or (s.dir == 1 ? v > n1 : v < n1)
+                    n1  := v
+                    n1I := bar_index - k
+            float n2 = na
+            int n2I = na
+            for k = bar_index - rsI + 1 to bar_index - hI - 1
+                float v = s.dir == 1 ? high[k] : low[k]
+                if na(n2) or (s.dir == 1 ? v > n2 : v < n2)
+                    n2  := v
+                    n2I := bar_index - k
+            bool neckOk = s.dir == 1 ? (n1 > ls and n2 > rs) : (n1 < ls and n2 < rs)
+            bool trendOk = true
+            if needTrend
+                float pe = na
+                for k = bar_index - lsI + 1 to bar_index - lsI + priorBars
+                    float v = s.dir == 1 ? high[k] : low[k]
+                    if na(pe) or (s.dir == 1 ? v > pe : v < pe)
+                        pe := v
+                trendOk := s.dir == 1 ? pe >= n1 + priorATR * atr : pe <= n1 - priorATR * atr
+            if neckOk and trendOk
+                s.ls := ls, s.hd := hd, s.rs := rs
+                s.lsI := lsI, s.hI := hI, s.rsI := rsI
+                s.n1 := n1, s.n2 := n2, s.n1I := n1I, s.n2I := n2I
+                s.armed := true
+                s.push := false
+                s.pext := na
+                s.neckBr := false
+                // a push that already printed while the RS was being confirmed
+                for k = bar_index - rsI - 1 to 1
+                    if s.dir * (close[k] - open[k]) >= impATR * atr
+                        s.push := true
+                    if s.push
+                        s.pext := na(s.pext) ? (s.dir == 1 ? high[k] : low[k]) : (s.dir == 1 ? math.max(s.pext, high[k]) : math.min(s.pext, low[k]))
+                ok := true
+                if showPat
+                    color c = s.dir == 1 ? bullC : bearC
+                    string st = s.dir == 1 ? label.style_label_up : label.style_label_down
+                    label.new(lsI, ls, "LS", style = st, color = color.new(c, 70), textcolor = color.white, size = size.tiny)
+                    label.new(hI, hd, "HEAD", style = st, color = color.new(c, 70), textcolor = color.white, size = size.tiny)
+                    label.new(rsI, rs, "RS", style = st, color = color.new(c, 70), textcolor = color.white, size = size.tiny)
+                    line.new(n1I, n1, n2I, n2, extend = extend.right, color = color.new(#2962ff, 20), width = 1, style = line.style_dashed)
+    ok
+
+if newLow and allowL
+    f_find(L, lowP, lowI)
+if newHigh and allowS
+    f_find(S, highP, highI)
+
+// ── open a virtual trade ──
+f_enter(Setup s) =>
+    int sig = 0
+    s.armed := false
+    s.usedRS := s.rsI
+    if T.dir == 0
+        float shoulder = stopIn == "Beyond both shoulders" ? (s.dir == 1 ? math.min(s.ls, s.rs) : math.max(s.ls, s.rs)) : s.rs
+        float sl = shoulder - s.dir * bufATR * atr
+        float depth = math.abs(f_neck(s.n1, s.n1I, s.n2, s.n2I, s.hI) - s.hd)
+        float tp = f_neck(s.n1, s.n1I, s.n2, s.n2I, bar_index) + s.dir * depth * tpFac
+        float risk = math.abs(close - sl)
+        float rew  = s.dir * (tp - close)
+        if risk > 0 and rew > 0 and rew / risk >= minRR
+            T.dir := s.dir, T.entry := close, T.sl := sl, T.tp := tp, T.eI := bar_index, T.be := false, T.risk0 := risk
+            T.n1 := s.n1, T.n2 := s.n2, T.n1I := s.n1I, T.n2I := s.n2I
+            sig := s.dir
+            if showPat
+                color c = s.dir == 1 ? bullC : bearC
+                label.new(bar_index, s.dir == 1 ? low : high, (s.dir == 1 ? "BUY " : "SELL ") + str.tostring(rew / risk, "#.#") + "R", style = s.dir == 1 ? label.style_label_up : label.style_label_down, color = c, textcolor = color.white, size = size.small)
+                T.slL := line.new(bar_index, sl, bar_index + 1, sl, color = bearC, width = 1)
+                T.tpL := line.new(bar_index, tp, bar_index + 1, tp, color = bullC, width = 1)
+    sig
+
+// ── setup state machine ──
+f_step(Setup s) =>
+    int sig = 0
+    if s.armed
+        if s.dir * (close - s.rs) < 0 or bar_index - s.rsI > maxAfter
+            s.armed := false
+            s.usedRS := s.rsI
+        else
+            float rng = high - low
+            bool reject = rng > 0 and (s.dir == 1 ? (close > open and close - low >= rejFrac * rng) : (close < open and high - close >= rejFrac * rng))
+            if pbMode
+                bool pushNow = s.dir * (close - open) >= impATR * atr
+                if pushNow and not s.push
+                    s.push := true
+                    s.pext := s.dir == 1 ? high : low
+                else if s.push
+                    bool dipped = s.dir == 1 ? (low <= s.pext - pbATR * atr and low > s.rs) : (high >= s.pext + pbATR * atr and high < s.rs)
+                    if dipped and reject and not pushNow
+                        sig := f_enter(s)
+                    else
+                        s.pext := s.dir == 1 ? math.max(s.pext, high) : math.min(s.pext, low)
+            else
+                float neck = f_neck(s.n1, s.n1I, s.n2, s.n2I, bar_index)
+                if not s.neckBr
+                    if s.dir * (close - neck) > 0
+                        s.neckBr := true
+                else
+                    bool touched = s.dir == 1 ? low <= neck + retTol * atr : high >= neck - retTol * atr
+                    if touched and reject and s.dir * (close - neck) > 0
+                        sig := f_enter(s)
+    sig
+
+// ── manage the open trade (bars after entry) ──
+float closedR = na
+if T.dir != 0 and bar_index > T.eI
+    float r0 = T.risk0
+    bool hitSL = T.dir == 1 ? low <= T.sl : high >= T.sl
+    bool hitTP = T.dir == 1 ? high >= T.tp : low <= T.tp
+    if hitSL
+        closedR := T.be ? 0.0 : -1.0
+    else if hitTP
+        closedR := math.abs(T.tp - T.entry) / r0
+    if not na(closedR)
+        if closedR > 0
+            nW += 1
+            grossW += closedR
+        else if closedR < 0
+            nL += 1
+            grossL -= closedR
+        else
+            nB += 1
+        sumR += closedR
+        peakR := math.max(peakR, sumR)
+        maxDD := math.max(maxDD, peakR - sumR)
+        if showPat and not na(T.slL)
+            line.set_x2(T.slL, bar_index)
+            line.set_x2(T.tpL, bar_index)
+            label.new(bar_index, T.dir == 1 ? high : low, closedR > 0 ? "+" + str.tostring(closedR, "#.#") + "R" : closedR < 0 ? "-1R" : "BE", style = label.style_none, textcolor = closedR > 0 ? bullC : closedR < 0 ? bearC : color.gray, size = size.small)
+        T.dir := 0
+    else
+        if showPat and not na(T.slL)
+            line.set_x2(T.slL, bar_index)
+            line.set_x2(T.tpL, bar_index)
+        if useBE and not T.be and T.dir * (close - f_neck(T.n1, T.n1I, T.n2, T.n2I, bar_index)) > 0
+            T.be := true
+            T.sl := T.entry
+            if showPat and not na(T.slL)
+                line.set_y1(T.slL, T.entry)
+                line.set_y2(T.slL, T.entry)
+
+int sigL = allowL ? f_step(L) : 0
+int sigS = allowS ? f_step(S) : 0
+
+alertcondition(sigL == 1, "HS buy (inverse H&S pullback)", "TWI HS: inverse H&S pullback BUY on {{ticker}} {{interval}}")
+alertcondition(sigS == -1, "HS sell (H&S pullback)", "TWI HS: H&S pullback SELL on {{ticker}} {{interval}}")
+bool lArm = L.armed
+bool sArm = S.armed
+alertcondition(lArm and not lArm[1], "Inverse H&S pattern formed", "TWI HS: inverse H&S formed on {{ticker}} {{interval}}, waiting for push + pullback")
+alertcondition(sArm and not sArm[1], "H&S pattern formed", "TWI HS: H&S formed on {{ticker}} {{interval}}, waiting for push + pullback")
+
+// ── scorecard ──
+f_pos(string p) => p == "Top Right" ? position.top_right : p == "Bottom Right" ? position.bottom_right : p == "Top Left" ? position.top_left : position.bottom_left
+var table card = table.new(f_pos(cardPos), 2, 9, bgcolor = color.new(#131722, 10), border_color = color.new(color.gray, 70), border_width = 1)
+f_c(int r, string a, string b, color c) =>
+    table.cell(card, 0, r, a, text_color = color.gray, text_size = size.small, text_halign = text.align_left)
+    table.cell(card, 1, r, b, text_color = c, text_size = size.small, text_halign = text.align_left)
+if barstate.islast and showCard
+    int n = nW + nL + nB
+    float pf = grossL > 0 ? grossW / grossL : na
+    string live = T.dir == 0 ? (L.armed ? "inverse H&S armed" : S.armed ? "H&S armed" : "none") : (T.dir == 1 ? "BUY open" : "SELL open") + (T.be ? " (BE)" : "")
+    f_c(0, "TWI HS · " + (pbMode ? "pullback" : "retest"), timeframe.period + " · " + str.tostring(n) + " trades", color.white)
+    f_c(1, "Wins / Losses / BE", str.tostring(nW) + " / " + str.tostring(nL) + " / " + str.tostring(nB), color.silver)
+    f_c(2, "Win rate", n > 0 ? str.tostring(100.0 * nW / n, "#") + "%" : "—", color.silver)
+    f_c(3, "Net", str.tostring(sumR, "+#.#;-#.#") + "R", sumR >= 0 ? bullC : bearC)
+    f_c(4, "Avg per trade", n > 0 ? str.tostring(sumR / n, "+#.##;-#.##") + "R" : "—", color.silver)
+    f_c(5, "Profit factor", na(pf) ? "—" : str.tostring(pf, "#.##"), na(pf) ? color.silver : pf >= 1 ? bullC : bearC)
+    f_c(6, "Max drawdown", str.tostring(maxDD, "#.#") + "R", color.silver)
+    f_c(7, "Since", str.format_time(firstT, "yyyy-MM-dd", syminfo.timezone), color.silver)
+    f_c(8, "Now", live, color.orange)

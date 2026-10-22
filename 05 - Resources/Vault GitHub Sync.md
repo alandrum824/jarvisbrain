@@ -17,6 +17,8 @@ At the end of each day's work, commit and push all vault changes to `origin/main
 3. `git push origin main`.
 4. If the push is rejected (remote has commits this session doesn't have — normal when another session pushed first, and can happen more than once in a row if both sessions are pushing near-simultaneously): `git fetch origin`, review `git log HEAD..origin/main --oneline` to see what's incoming (it's expected multi-session work, not a red flag), then `git pull origin main --no-rebase` to merge. Repeat fetch→merge→push if it's rejected again.
 
+**Lapse found 2026-10-21:** no push had happened since 2026-09-29 (138 files: research scripts, EAs, a store theme backup). Check `git log -1` at session startup; if the last commit is more than a day old, raise it. A backlog that large gets Adam's OK before pushing (done 2026-10-21: "Yes").
+
 ## Resolving merge conflicts
 Conflicts happen most often in shared list-style notes both sessions touch the same day — chiefly **Active Priorities.md**. Resolve by keeping both sessions' unique items; only drop a line if it's a true duplicate of the same task, and in that case keep whichever version is more current/detailed (the other session's line usually carries the newer status). Never resolve a conflict by discarding a side wholesale — read both before deciding. After resolving, confirm no `<<<<<<<`/`=======`/`>>>>>>>` markers remain anywhere before committing the merge.
 

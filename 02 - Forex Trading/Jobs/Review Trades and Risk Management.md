@@ -40,3 +40,5 @@ type: guide
 - **By symbol:** GBPUSD −$511.38 (10 trades, 30% win); EURUSD −$156.81 (91 trades, 57% win); gold −$48.16; GBPAUD −$41.54 (0/5).
 - **Pattern:** adding to losers. On 9/21, four EURUSD buys at 0.4–0.5 lots, averaged down 1.1482 → 1.1473, all closed at 1.14535: −$433.72 in one sequence. Last week (W39): 24 trades, 25% win, −$465.
 - **Rules that follow from the data:** 0.01 lot per 30–40 pip stop (2–3% risk), a hard stop on every trade, no adding to a losing position, and a `risk` check before every entry.
+
+- **2026-09-30 ~12:30 AM PT: balance $306.05** (from $237.26: gold +$36.46 and +$5.09, USDCAD +$27.24 at 0.32 lots). A winning streak on small gold size. The USDCAD size was over the journal's danger line.

@@ -91,3 +91,9 @@ Two related process failures from the same session:
 - **Synthetic tick modes never test a spread gate.** "Every tick" from bars uses a fixed spread. On the 09-22 synthetic run, the OB EA's 50-point gate blocked 0 setups; on real AAAFx ticks it blocked every in-session entry (spread 51-53). Any EA with a MaxSpread input needs a real-tick run before the gate can be trusted.
 - **The account leverage caps `Leverage=` in the ini:** asked for 500, got 1:100 on AAAFxGlobal-5 Real.
 
+
+## Working method banked 2026-10-10: multi-year M1 bars for offline replays
+- **Dead end, skip it:** the live Python link (`mt5-readonly` venv) is capped by the terminal's Max bars (100,000), so `copy_rates_range` over years returns `(-2, 'Terminal: Invalid params')`, and `copy_rates_from_pos` gives only ~70 days of M1.
+- **Winning method:** run `TWIBarsExportTester` headless on the desktop AAAFx terminal (ini: `Expert=Advisors\TWIBarsExportTester`, `Period=M1`, `Model=2`, `ShutdownTerminal=1`, unique `Report=` name). It writes `Common\Files\bars_export_tester.csv`, which each run overwrites, so copy it out after each symbol. Driver: `C:\Users\aland\stg\obh\export_all.py` (closes the terminal first and waits for every `terminal64.exe` to stay down). About 30 s per symbol for 2020→now (~2.5M bars).
+- **Store exports in `C:\Users\aland\stg\obh\`, never %TEMP%.** The 09-27 exports were in %TEMP% and had been cleaned out by 10-10.
+- History on AAAFx starts 2020-01-02 for EURUSD, GBPUSD, USDJPY and XAUUSD.

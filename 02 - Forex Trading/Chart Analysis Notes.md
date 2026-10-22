@@ -192,3 +192,35 @@ Voice-line's Jarvis told Adam the 1.35518 entry had "already traded through" and
 **Pat's method, per Adam:** zones marked on the **1-hour** chart; entry taken on the **5-minute** chart on a retracement into the **70–80% Fibonacci** zone of the latest M5 impulse leg, in the direction of the H1 zone (sell at H1 supply, buy at H1 demand). He was **waiting to sell**, not long. (Jarvis first read his drawing as a long; Adam corrected it.)
 **Live application (OANDA XAUUSD M5, 10:30 ET):** H1 sell zone ~4279–4284; targets 4256–4260, then 4245–4249. M5 impulse: 4284.5 high (9:35 ET) → 4254.58 low (10:05 ET). Fib 70% = 4275.5, 75% = 4277.0, 79% = 4278.2, 80% = 4278.5, so the 70–80% band **4275.5–4278.5** sits just under the H1 zone (confluence). Implied plan: sell ~4276–4279, stop above 4284.5 (~4286), TP1 4258 (~2R), TP2 4247 (~3R). Invalidation: an M5 close above ~4285. Price at the check: ~4265, not there yet.
 
+
+## 2026-09-30: inverse head & shoulders scan (Adam's request)
+Scanned 13 AAAFx symbols on M15/H1/H4 with pivot logic (read-only, `mt5ro` venv).
+- **Only one forming that hasn't broken yet:** XAGUSD H1 (OANDA feed).
+  - Left shoulder 60.75 (9/28 14:00 UTC).
+  - Head 60.30 (9/29 05:00).
+  - Right shoulder 60.83 (9/30 02:00).
+  - Neckline nearly flat at ~61.69–61.73.
+  - Price was 61.46 at 00:25 PT.
+  - Measured target 63.12.
+  - Marked on the TradingView chart: neckline, LS/HEAD/RS labels, target line.
+- **Caveats:**
+  - It's a reversal pattern against silver's drop from 65 → 60.3.
+  - A stop under the right shoulder is ~0.94, which is $47 per 0.01 lot (contract 5000) = ~20% of $237. Too big for Adam's size.
+  - The measured-target R is only ~1.5.
+- **Already completed** (M15, broke the neckline before the scan): GBPJPY, EURJPY, NZDUSD.
+- **Gold:** no inverse H&S. The 4110.87 / 4113.49 lows are a double bottom.
+
+## 2026-09-30: the VemoFX "sniper entry" pattern, and a live scan
+**The pattern** (from Adam's VemoFX clip screenshots, AUDUSD and USDJPY M30):
+- A level that has already held once (a range low or old support).
+- Price returns and wicks through it (a sweep), then closes back inside.
+- Enter with a limit at or near the level. SL goes under the sweep wick. TP is the zone the move started from.
+- It's steps 3–5 of [[SMC Playbook (Imperial FX)]] on a smaller scale.
+
+**Scan at ~12:40 AM PT** (15 symbols, M30/H1, read-only `mt5ro` venv, 5-bar pivots, level intact until the last 12 bars):
+- **USDJPY M30/H1 BUY (best).** Support 156.50–156.60 has held since 9/18. It was swept to ~156.37 around 02:30 UTC and closed back above. Price 156.78, SL 156.34, TP1 157.72 (~2.2R). The far target is 159.04. Max 0.02 lot at 2% of $306 ($2.49 per 0.01). Marked on TradingView (OANDA:USDJPY 30m).
+- **GBPUSD H1 SELL (unconfirmed).** Resistance 1.32746 (9/28 high). The 07:00 UTC candle wicked to 1.32782, but the candle wasn't closed at scan time. SL ~1.3279, TP 1.32022 (~5.8R). Max 0.05 lot. Marked on TradingView (OANDA:GBPUSD 1H).
+- NZDUSD M30 SELL: 0.56598 swept at 06:00, ~3R. It conflicts with the completed M15 inverse H&S.
+- GBPJPY/EURJPY H1: old supports swept overnight (the same yen move as USDJPY); their targets are distant 9/18 highs.
+- EURGBP: price approaching 0.8550, a level touched 5+ times. That's a liquidity pool, so watch for a sweep under it.
+- USDCAD: two-way, low R. Skipped.

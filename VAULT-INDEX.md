@@ -68,6 +68,7 @@ All open work lives in one note: [[Active Priorities]]. Tag each item with its p
 ## Health
 
 - Has POTS syndrome, which limits how much he's able to work.
+- Also has neuropathy and cervical + lumbar disc problems with nerve involvement (stated 2026-10-09). For exercise: avoid prolonged head-down positions and challenging balance work, and flag anything that could worsen dizziness or nerve symptoms.
 
 ## My Preferences for Working with AI
 

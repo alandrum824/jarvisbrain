@@ -1,0 +1,613 @@
+//@version=6
+// TWI Volume OB Trend - simple high-volume order blocks, trend-colored candles, "losing steam" marks.
+// Order block: last opposite candle before one strong candle (body >= x ATR) that closes beyond it on high volume.
+// A block is removed once price closes through it. Everything fires on closed bars only.
+// Trend: fast EMA above slow EMA = uptrend (teal candles), below = downtrend (red candles).
+// Losing steam: trend has real strength (ADX >= x), but the MACD histogram has shrunk N bars in a row (small dot, once per fade).
+// Daily levels: yesterday's high/low (solid, PDH/PDL) and today's high/low so far (dotted), drawn for yesterday + today only.
+// HTF table: H1 / H4 / D trend (same EMA rule), strength (ADX), momentum (MACD histogram + RSI), from the last CLOSED candle.
+// Base zones: a tight consolidation (range <= x ATR) followed by one big push candle that closes outside it.
+// Structure: swing = highest/lowest of N candles each side. A CLOSE past the last swing = BOS (with structure),
+//   CHoCH (against structure, flips it), MSS (a CHoCH whose candle body >= x ATR).
+// Trade map: premium/discount of the last swing range, nearest buy/sell zone, H4+D bias -> look for buys / sells / wait.
+indicator("TWI Volume OB Trend", shorttitle = "TWI-VOB", overlay = true, max_boxes_count = 100, max_labels_count = 100, max_lines_count = 60)
+
+// ───────────────────────── Inputs ─────────────────────────
+grpT = "Trend"
+fastLen   = input.int(21, "Fast EMA", minval = 1, group = grpT)
+slowLen   = input.int(50, "Slow EMA", minval = 1, group = grpT)
+colorBars = input.bool(true, "Color candles by trend", group = grpT)
+showEMA   = input.bool(false, "Show EMAs", group = grpT)
+
+grpO = "Order blocks"
+showOB   = input.bool(true, "Show order blocks", group = grpO)
+volLen   = input.int(20, "Volume average length", minval = 1, group = grpO)
+volMult  = input.float(1.5, "High volume = x average", minval = 1.0, step = 0.1, group = grpO)
+dispMult = input.float(1.0, "Strong candle body >= x ATR", minval = 0.1, step = 0.1, group = grpO)
+maxOB    = input.int(5, "Max blocks kept per side", minval = 1, maxval = 40, group = grpO)
+
+grpS = "Losing steam"
+showSteam = input.bool(true, "Mark losing steam", group = grpS)
+steamBars = input.int(3, "Momentum fading for N bars", minval = 2, maxval = 10, group = grpS)
+steamAdx  = input.float(20, "Only when chart ADX >= (trend has real strength)", minval = 0, group = grpS)
+
+grpD = "Daily levels"
+showPD = input.bool(true, "Yesterday's high / low (PDH / PDL)", group = grpD)
+showTD = input.bool(true, "Today's high / low so far", group = grpD)
+dHiCol = input.color(color.new(#42a5f5, 0), "High color", group = grpD)
+dLoCol = input.color(color.new(#ab47bc, 0), "Low color", group = grpD)
+
+grpB = "Base zones (consolidation then big push)"
+showBase  = input.bool(true, "Show base zones", group = grpB)
+baseMin   = input.int(3, "Min candles in base", minval = 2, maxval = 20, group = grpB)
+baseMax   = input.int(12, "Max candles in base", minval = 3, maxval = 30, group = grpB)
+baseTight = input.float(1.5, "Base range <= x ATR", minval = 0.1, step = 0.1, group = grpB)
+pushMult  = input.float(1.5, "Push candle body >= x ATR", minval = 0.1, step = 0.1, group = grpB)
+maxBase   = input.int(4, "Max zones kept per side", minval = 1, maxval = 20, group = grpB)
+confATR   = input.float(0.5, "Strong if within x ATR of PDH/PDL or an OB", minval = 0.0, step = 0.1, group = grpB)
+
+grpM = "Market structure"
+showMS   = input.bool(true, "Show BOS / CHoCH / MSS", group = grpM)
+swingLen = input.int(5, "Swing length (candles each side)", minval = 1, maxval = 20, group = grpM)
+mssDisp  = input.float(1.0, "MSS = CHoCH with body >= x ATR", minval = 0.1, step = 0.1, group = grpM)
+maxMS    = input.int(8, "Max breaks kept", minval = 1, maxval = 30, group = grpM)
+
+grpK = "Key zones + trade map"
+showPDZ = input.bool(true, "Premium / discount (50% line)", group = grpK)
+rangeLen = input.int(15, "Premium / discount swing length (candles each side)", minval = 2, maxval = 50, group = grpK)
+showKey = input.bool(true, "Tag best BUY / SELL zone", group = grpK)
+showMap = input.bool(true, "Show trade map rows in the panel", group = grpK)
+panelPos = input.string("Bottom left", "Panel position (HTF + trade map)", options = ["Bottom left", "Bottom right", "Top left", "Top right", "Middle left", "Middle right"], group = grpK)
+
+grpH = "Higher-timeframe rows"
+showHTF = input.bool(true, "Show H1 / H4 / D rows in the panel", group = grpH)
+tblSize = input.string("Small", "Panel text size", options = ["Tiny", "Small", "Normal"], group = grpH)
+adxLen  = input.int(14, "ADX length", minval = 1, group = grpH)
+adxStrong = input.float(25, "ADX strong at", minval = 1, group = grpH)
+adxBuild  = input.float(20, "ADX building at", minval = 1, group = grpH)
+
+grpL = "Layout"
+rightPad = input.int(20, "Zones extend right of price (bars)", minval = 5, maxval = 100, group = grpL)
+
+bullCol  = color.new(#089981, 0)
+bearCol  = color.new(#f23645, 0)
+steamCol = color.new(#ff9800, 0)
+weakCol  = color.new(#787b86, 0)
+textCol  = color.new(#d1d4dc, 0)
+noCol    = color.new(color.black, 100)
+
+// ───────────────────────── Trend ─────────────────────────
+emaF = ta.ema(close, fastLen)
+emaS = ta.ema(close, slowLen)
+upTrend = emaF > emaS
+
+barcolor(colorBars ? (upTrend ? bullCol : bearCol) : na)
+plot(showEMA ? emaF : na, "Fast EMA", color.new(color.gray, 0), 1)
+plot(showEMA ? emaS : na, "Slow EMA", color.new(color.silver, 0), 2)
+
+// ───────────────────────── High-volume order blocks ─────────────────────────
+atrV   = ta.atr(14)
+volAvg = ta.sma(nz(volume), volLen)
+volX   = nz(volAvg[1]) > 0 ? nz(volume) / volAvg[1] : 0.0
+hiVol  = volX >= volMult
+
+bullOB = close[1] < open[1] and close > open and (close - open) >= dispMult * atrV and close > high[1] and hiVol
+bearOB = close[1] > open[1] and close < open and (open - close) >= dispMult * atrV and close < low[1] and hiVol
+
+var array<box> bullBoxes = array.new<box>()
+var array<box> bearBoxes = array.new<box>()
+
+if showOB and barstate.isconfirmed
+    if bullOB
+        array.push(bullBoxes, box.new(bar_index - 1, high[1], bar_index + rightPad, low[1], border_color = noCol, bgcolor = color.new(bullCol, 82), text = "OB " + str.tostring(volX, "#.#") + "x", text_color = color.new(bullCol, 20), text_size = size.tiny, text_halign = text.align_right))
+        if array.size(bullBoxes) > maxOB
+            box.delete(array.shift(bullBoxes))
+    if bearOB
+        array.push(bearBoxes, box.new(bar_index - 1, high[1], bar_index + rightPad, low[1], border_color = noCol, bgcolor = color.new(bearCol, 82), text = "OB " + str.tostring(volX, "#.#") + "x", text_color = color.new(bearCol, 20), text_size = size.tiny, text_halign = text.align_right))
+        if array.size(bearBoxes) > maxOB
+            box.delete(array.shift(bearBoxes))
+    // keep live blocks extended; drop a block once price closes through it
+    if array.size(bullBoxes) > 0
+        for i = array.size(bullBoxes) - 1 to 0
+            b = array.get(bullBoxes, i)
+            if close < box.get_bottom(b)
+                box.delete(b)
+                array.remove(bullBoxes, i)
+            else
+                box.set_right(b, bar_index + rightPad)
+    if array.size(bearBoxes) > 0
+        for i = array.size(bearBoxes) - 1 to 0
+            b = array.get(bearBoxes, i)
+            if close > box.get_top(b)
+                box.delete(b)
+                array.remove(bearBoxes, i)
+            else
+                box.set_right(b, bar_index + rightPad)
+
+// ───────────────────────── Losing steam ─────────────────────────
+[macdLine, sigLine, hist] = ta.macd(close, 12, 26, 9)
+[cDiP, cDiM, chartAdx] = ta.dmi(adxLen, adxLen)
+histFall = ta.falling(hist, steamBars)
+histRise = ta.rising(hist, steamBars)
+upFade = upTrend and hist > 0 and histFall and chartAdx >= steamAdx
+dnFade = not upTrend and hist < 0 and histRise and chartAdx >= steamAdx
+upSteam = showSteam and upFade and not upFade[1] and barstate.isconfirmed
+dnSteam = showSteam and dnFade and not dnFade[1] and barstate.isconfirmed
+
+plotshape(upSteam, "Losing steam (uptrend)", shape.circle, location.abovebar, color.new(steamCol, 10), size = size.tiny)
+plotshape(dnSteam, "Losing steam (downtrend)", shape.circle, location.belowbar, color.new(steamCol, 10), size = size.tiny)
+
+// ───────────────────────── Daily levels ─────────────────────────
+intraday = timeframe.isintraday
+newDay = timeframe.change("D")
+var float tdh = na
+var float tdl = na
+var float pdh = na
+var float pdl = na
+var int dayStart = na
+var int prevDayStart = na
+if newDay
+    pdh := tdh
+    pdl := tdl
+    tdh := high
+    tdl := low
+    prevDayStart := dayStart
+    dayStart := bar_index
+else
+    tdh := math.max(nz(tdh, high), high)
+    tdl := math.min(nz(tdl, low), low)
+
+// one set of objects, moved on the last bar (no duplicates on realtime ticks); only yesterday + today are drawn
+var line  pdhLine = line.new(na, na, na, na, color = dHiCol, style = line.style_solid, width = 1)
+var line  pdlLine = line.new(na, na, na, na, color = dLoCol, style = line.style_solid, width = 1)
+var line  tdhLine = line.new(na, na, na, na, color = color.new(dHiCol, 30), style = line.style_dotted, width = 1)
+var line  tdlLine = line.new(na, na, na, na, color = color.new(dLoCol, 30), style = line.style_dotted, width = 1)
+// text ENDS at the line's right end (highs sit just above their line, lows just below), so it never runs off a narrow screen
+var label pdhLbl  = label.new(na, na, "", style = label.style_label_lower_right, color = noCol, textcolor = dHiCol, size = size.tiny)
+var label pdlLbl  = label.new(na, na, "", style = label.style_label_upper_right, color = noCol, textcolor = dLoCol, size = size.tiny)
+var label tdhLbl  = label.new(na, na, "", style = label.style_label_lower_right, color = noCol, textcolor = color.new(dHiCol, 30), size = size.tiny)
+var label tdlLbl  = label.new(na, na, "", style = label.style_label_upper_right, color = noCol, textcolor = color.new(dLoCol, 30), size = size.tiny)
+
+lblX = bar_index + rightPad + 1
+if barstate.islast and intraday and not na(dayStart)
+    if showTD
+        line.set_xy1(tdhLine, dayStart, tdh)
+        line.set_xy2(tdhLine, lblX, tdh)
+        line.set_xy1(tdlLine, dayStart, tdl)
+        line.set_xy2(tdlLine, lblX, tdl)
+        label.set_xy(tdhLbl, lblX, tdh)
+        label.set_text(tdhLbl, "Today H " + str.tostring(tdh, format.mintick))
+        label.set_xy(tdlLbl, lblX, tdl)
+        label.set_text(tdlLbl, "Today L " + str.tostring(tdl, format.mintick))
+    // today's high/low within 0.3 ATR of PDH/PDL: one merged label instead of two stacked
+    mergeHi = showTD and showPD and not na(pdh) and math.abs(tdh - pdh) <= 0.3 * atrV
+    mergeLo = showTD and showPD and not na(pdl) and math.abs(tdl - pdl) <= 0.3 * atrV
+    if mergeHi
+        label.set_xy(tdhLbl, na, na)
+    if mergeLo
+        label.set_xy(tdlLbl, na, na)
+    if showPD and not na(pdh)
+        pStart = na(prevDayStart) ? dayStart : prevDayStart
+        line.set_xy1(pdhLine, pStart, pdh)
+        line.set_xy2(pdhLine, lblX, pdh)
+        line.set_xy1(pdlLine, pStart, pdl)
+        line.set_xy2(pdlLine, lblX, pdl)
+        label.set_xy(pdhLbl, lblX, pdh)
+        label.set_text(pdhLbl, "PDH " + str.tostring(pdh, format.mintick) + (mergeHi ? " · Today H " + str.tostring(tdh, format.mintick) : ""))
+        label.set_xy(pdlLbl, lblX, pdl)
+        label.set_text(pdlLbl, "PDL " + str.tostring(pdl, format.mintick) + (mergeLo ? " · Today L " + str.tostring(tdl, format.mintick) : ""))
+
+// ───────────────────────── Base zones ─────────────────────────
+var array<box>   dBases = array.new<box>()    // demand (push up)
+var array<box>   sBases = array.new<box>()    // supply (push down)
+var array<int>   dTests = array.new<int>()
+var array<int>   sTests = array.new<int>()
+var array<float> dPush  = array.new<float>()
+var array<float> sPush  = array.new<float>()
+var array<bool>  dStrong = array.new<bool>()
+var array<bool>  sStrong = array.new<bool>()
+
+baseText(float push, int tests, bool strong) =>
+    (strong ? "STRONG BASE " : "BASE ") + str.tostring(push, "#.#") + " ATR" + (tests > 0 ? " ×" + str.tostring(tests) : "")
+
+nearConfluence(float top, float bot, float pad) =>
+    hit = (not na(pdh) and pdh >= bot - pad and pdh <= top + pad) or (not na(pdl) and pdl >= bot - pad and pdl <= top + pad)
+    for b in bullBoxes
+        if box.get_top(b) >= bot - pad and box.get_bottom(b) <= top + pad
+            hit := true
+    for b in bearBoxes
+        if box.get_top(b) >= bot - pad and box.get_bottom(b) <= top + pad
+            hit := true
+    hit
+
+enteredBase = false
+if showBase and barstate.isconfirmed
+    // existing zones first: count holds, delete on a close through
+    if array.size(dBases) > 0
+        for i = array.size(dBases) - 1 to 0
+            b = array.get(dBases, i)
+            if close < box.get_bottom(b)
+                box.delete(b)
+                array.remove(dBases, i)
+                array.remove(dTests, i)
+                array.remove(dPush, i)
+                array.remove(dStrong, i)
+            else
+                box.set_right(b, bar_index + rightPad)
+                if low <= box.get_top(b) and low[1] > box.get_top(b)
+                    enteredBase := true
+                    t = array.get(dTests, i) + 1
+                    array.set(dTests, i, t)
+                    box.set_text(b, baseText(array.get(dPush, i), t, array.get(dStrong, i)))
+    if array.size(sBases) > 0
+        for i = array.size(sBases) - 1 to 0
+            b = array.get(sBases, i)
+            if close > box.get_top(b)
+                box.delete(b)
+                array.remove(sBases, i)
+                array.remove(sTests, i)
+                array.remove(sPush, i)
+                array.remove(sStrong, i)
+            else
+                box.set_right(b, bar_index + rightPad)
+                if high >= box.get_bottom(b) and high[1] < box.get_bottom(b)
+                    enteredBase := true
+                    t = array.get(sTests, i) + 1
+                    array.set(sTests, i, t)
+                    box.set_text(b, baseText(array.get(sPush, i), t, array.get(sStrong, i)))
+
+    // new zone: longest tight run of candles right before a big push candle
+    body = math.abs(close - open)
+    if body >= pushMult * atrV
+        bHi = high[1]
+        bLo = low[1]
+        bestN = 0
+        bestHi = 0.0
+        bestLo = 0.0
+        for n = 1 to baseMax
+            bHi := math.max(bHi, high[n])
+            bLo := math.min(bLo, low[n])
+            if bHi - bLo > baseTight * atrV
+                break
+            if n >= baseMin
+                bestN := n
+                bestHi := bHi
+                bestLo := bLo
+        if bestN > 0
+            pushX = body / atrV
+            strong = nearConfluence(bestHi, bestLo, confATR * atrV)
+            fillT = strong ? 74 : 90
+            if close > open and close > bestHi
+                array.push(dBases, box.new(bar_index - bestN, bestHi, bar_index + rightPad, bestLo, border_color = color.new(bullCol, 40), border_width = 1, border_style = line.style_dashed, bgcolor = color.new(bullCol, fillT), text = baseText(pushX, 0, strong), text_color = bullCol, text_size = size.tiny, text_halign = text.align_right, text_valign = text.align_bottom))
+                array.push(dTests, 0)
+                array.push(dPush, pushX)
+                array.push(dStrong, strong)
+                if array.size(dBases) > maxBase
+                    box.delete(array.shift(dBases))
+                    array.shift(dTests)
+                    array.shift(dPush)
+                    array.shift(dStrong)
+            if close < open and close < bestLo
+                array.push(sBases, box.new(bar_index - bestN, bestHi, bar_index + rightPad, bestLo, border_color = color.new(bearCol, 40), border_width = 1, border_style = line.style_dashed, bgcolor = color.new(bearCol, fillT), text = baseText(pushX, 0, strong), text_color = bearCol, text_size = size.tiny, text_halign = text.align_right, text_valign = text.align_top))
+                array.push(sTests, 0)
+                array.push(sPush, pushX)
+                array.push(sStrong, strong)
+                if array.size(sBases) > maxBase
+                    box.delete(array.shift(sBases))
+                    array.shift(sTests)
+                    array.shift(sPush)
+                    array.shift(sStrong)
+
+// ───────────────────────── Market structure ─────────────────────────
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+var float swH = na      // last unbroken swing high
+var int   swHx = na
+var float swL = na
+var int   swLx = na
+var float lastSwH = na  // last swing high/low for the dealing range (kept after a break)
+var int   lastSwHx = na
+var float lastSwL = na
+var int   lastSwLx = na
+var int   msDir = 0
+var array<line>  msLines  = array.new<line>()
+var array<label> msLabels = array.new<label>()
+
+if not na(ph)
+    swH := ph
+    swHx := bar_index - swingLen
+if not na(pl)
+    swL := pl
+    swLx := bar_index - swingLen
+
+// the dealing range uses bigger swings than BOS/CHoCH, so minor chop doesn't shrink it
+rph = ta.pivothigh(high, rangeLen, rangeLen)
+rpl = ta.pivotlow(low, rangeLen, rangeLen)
+if not na(rph)
+    lastSwH := rph
+    lastSwHx := bar_index - rangeLen
+if not na(rpl)
+    lastSwL := rpl
+    lastSwLx := bar_index - rangeLen
+
+msBreak(int x1, float y, bool bull, string kind) =>
+    col = bull ? bullCol : bearCol
+    array.push(msLines, line.new(x1, y, bar_index, y, color = color.new(col, kind == "BOS" ? 30 : 0), style = kind == "BOS" ? line.style_dashed : line.style_solid, width = kind == "MSS" ? 2 : 1))
+    array.push(msLabels, label.new(math.round((x1 + bar_index) / 2), y, kind, style = bull ? label.style_label_down : label.style_label_up, color = noCol, textcolor = col, size = size.tiny))
+    if array.size(msLines) > maxMS
+        line.delete(array.shift(msLines))
+        label.delete(array.shift(msLabels))
+    true
+
+bodyUp = close > open and close - open >= mssDisp * atrV
+bodyDn = close < open and open - close >= mssDisp * atrV
+bosUp = false
+chochUp = false
+mssUp = false
+bosDn = false
+chochDn = false
+mssDn = false
+if barstate.isconfirmed
+    if not na(swH) and close > swH
+        kind = msDir == -1 ? (bodyUp ? "MSS" : "CHoCH") : "BOS"
+        if showMS
+            msBreak(swHx, swH, true, kind)
+        bosUp := kind == "BOS"
+        chochUp := kind == "CHoCH"
+        mssUp := kind == "MSS"
+        msDir := 1
+        swH := na
+    if not na(swL) and close < swL
+        kind = msDir == 1 ? (bodyDn ? "MSS" : "CHoCH") : "BOS"
+        if showMS
+            msBreak(swLx, swL, false, kind)
+        bosDn := kind == "BOS"
+        chochDn := kind == "CHoCH"
+        mssDn := kind == "MSS"
+        msDir := -1
+        swL := na
+
+// same structure rule, compact, for the higher timeframes
+structDir() =>
+    var float sH = na
+    var float sL = na
+    var int dir = 0
+    p1 = ta.pivothigh(high, swingLen, swingLen)
+    p2 = ta.pivotlow(low, swingLen, swingLen)
+    if not na(p1)
+        sH := p1
+    if not na(p2)
+        sL := p2
+    if not na(sH) and close > sH
+        dir := 1
+        sH := na
+    if not na(sL) and close < sL
+        dir := -1
+        sL := na
+    dir
+
+// ───────────────────────── Higher-timeframe table ─────────────────────────
+// values from the last CLOSED HTF candle ([1] + lookahead_on = no repaint)
+htfRead() =>
+    eF = ta.ema(close, fastLen)
+    eS = ta.ema(close, slowLen)
+    [dPlus, dMinus, adxV] = ta.dmi(adxLen, adxLen)
+    [mL, sL, hV] = ta.macd(close, 12, 26, 9)
+    rV = ta.rsi(close, 14)
+    st = structDir()
+    [eF[1] > eS[1] ? 1 : -1, adxV[1], hV[1] - hV[2], rV[1], st[1]]
+
+[h1Dir, h1Adx, h1Dh, h1Rsi, h1St] = request.security(syminfo.tickerid, "60", htfRead(), lookahead = barmerge.lookahead_on)
+[h4Dir, h4Adx, h4Dh, h4Rsi, h4St] = request.security(syminfo.tickerid, "240", htfRead(), lookahead = barmerge.lookahead_on)
+[d1Dir, d1Adx, d1Dh, d1Rsi, d1St] = request.security(syminfo.tickerid, "D", htfRead(), lookahead = barmerge.lookahead_on)
+
+chartSec = timeframe.in_seconds()
+h1Ok = chartSec < timeframe.in_seconds("60")
+h4Ok = chartSec < timeframe.in_seconds("240")
+d1Ok = chartSec < timeframe.in_seconds("D")
+
+nValid = (h1Ok ? 1 : 0) + (h4Ok ? 1 : 0) + (d1Ok ? 1 : 0)
+nUp    = (h1Ok and h1Dir == 1 ? 1 : 0) + (h4Ok and h4Dir == 1 ? 1 : 0) + (d1Ok and d1Dir == 1 ? 1 : 0)
+nDn    = nValid - nUp
+alignState = nValid == 0 ? 0 : nUp == nValid ? 1 : nDn == nValid ? -1 : 0
+
+tSize = tblSize == "Tiny" ? size.tiny : tblSize == "Normal" ? size.normal : size.small
+pPos  = panelPos == "Bottom right" ? position.bottom_right : panelPos == "Top left" ? position.top_left : panelPos == "Top right" ? position.top_right : panelPos == "Middle left" ? position.middle_left : panelPos == "Middle right" ? position.middle_right : position.bottom_left
+// one compact panel: HTF rows (0-3) + trade map rows (4-8), sized for a phone screen
+var table panel = table.new(pPos, 4, 9, bgcolor = color.new(#131722, 20), border_width = 0, frame_color = color.new(#2a2e39, 0), frame_width = 1)
+
+stText(int s) =>
+    s == 1 ? "▲ BULL" : s == -1 ? "▼ BEAR" : "—"
+stArrow(int s) =>
+    s == 1 ? "▲" : s == -1 ? "▼" : "—"
+stColor(int s) =>
+    s == 1 ? bullCol : s == -1 ? bearCol : weakCol
+
+// row: TF | trend + ADX strength | momentum + RSI | structure
+htfRow(int row, string tf, bool ok, int dir, float adxV, float dh, float rsiV, int st) =>
+    table.cell(panel, 0, row, tf, text_color = textCol, text_size = tSize, text_halign = text.align_left)
+    if not ok or na(adxV)
+        table.cell(panel, 1, row, "—", text_color = weakCol, text_size = tSize)
+        table.cell(panel, 2, row, "—", text_color = weakCol, text_size = tSize)
+        table.cell(panel, 3, row, "—", text_color = weakCol, text_size = tSize)
+    else
+        tCol = dir == 1 ? bullCol : bearCol
+        sTxt = adxV >= adxStrong ? " strong" : adxV >= adxBuild ? " build" : " weak"
+        sCol = adxV >= adxStrong ? tCol : adxV >= adxBuild ? color.new(tCol, 20) : color.new(tCol, 45)
+        table.cell(panel, 1, row, (dir == 1 ? "▲ " : "▼ ") + str.tostring(adxV, "#") + sTxt, text_color = sCol, text_size = tSize, text_halign = text.align_left)
+        // momentum grows in the trend's direction = Push, shrinks against it = Fade
+        pushing = dir == 1 ? dh > 0 : dh < 0
+        table.cell(panel, 2, row, (pushing ? "Push · " : "Fade · ") + str.tostring(rsiV, "#"), text_color = pushing ? tCol : steamCol, text_size = tSize, text_halign = text.align_left)
+        table.cell(panel, 3, row, stArrow(st), text_color = stColor(st), text_size = tSize)
+    true
+
+if barstate.islast and (showHTF or showMap)
+    // header carries the alignment, so no bottom row sits under TradingView's own buttons
+    aTxt = not showHTF or nValid == 0 ? "TWI-VOB" : alignState == 1 ? "HTF ▲ " + str.tostring(nUp) + "/" + str.tostring(nValid) + " UP" : alignState == -1 ? "HTF ▼ " + str.tostring(nDn) + "/" + str.tostring(nValid) + " DN" : "HTF mixed " + str.tostring(nUp) + "▲ " + str.tostring(nDn) + "▼"
+    aCol = not showHTF ? textCol : alignState == 1 ? bullCol : alignState == -1 ? bearCol : weakCol
+    table.cell(panel, 0, 0, aTxt + "  ·  chart " + stText(msDir), bgcolor = color.new(aCol, 80), text_color = aCol, text_size = tSize)
+    table.merge_cells(panel, 0, 0, 3, 0)
+    if showHTF
+        htfRow(1, "H1", h1Ok, h1Dir, h1Adx, h1Dh, h1Rsi, h1St)
+        htfRow(2, "H4", h4Ok, h4Dir, h4Adx, h4Dh, h4Rsi, h4St)
+        htfRow(3, "D", d1Ok, d1Dir, d1Adx, d1Dh, d1Rsi, d1St)
+
+// ───────────────────────── Key zones + trade map ─────────────────────────
+// dealing range = last swing low to last swing high; above 50% = premium (sells), below = discount (buys)
+rHi = math.max(nz(lastSwH), nz(lastSwL))
+rLo = math.min(nz(lastSwH), nz(lastSwL))
+eqV = not na(lastSwH) and not na(lastSwL) ? (rHi + rLo) / 2 : na
+inPremium = not na(eqV) and close > eqV
+
+var line  eqLine   = line.new(na, na, na, na, color = color.new(weakCol, 20), style = line.style_dotted, width = 1)
+// EQ tag sits just above its line, right of the last candle (the daily labels end further right)
+var label eqLbl    = label.new(na, na, "", style = label.style_label_lower_left, color = noCol, textcolor = weakCol, size = size.tiny)
+// premium / discount tags sit on the swing candles themselves (above the high, below the low): nothing else is drawn there
+var label premLbl  = label.new(na, na, "PREMIUM · sells", style = label.style_label_down, color = noCol, textcolor = color.new(bearCol, 30), size = size.tiny)
+var label discLbl  = label.new(na, na, "DISCOUNT · buys", style = label.style_label_up, color = noCol, textcolor = color.new(bullCol, 30), size = size.tiny)
+var box   buyHL    = box.new(na, na, na, na, border_color = bullCol, border_width = 2, bgcolor = noCol)
+var box   sellHL   = box.new(na, na, na, na, border_color = bearCol, border_width = 2, bgcolor = noCol)
+// zone tags just right of the last candle, away from the structure labels
+var label buyTag   = label.new(na, na, "BUY ZONE", style = label.style_label_left, color = noCol, textcolor = bullCol, size = size.small)
+var label sellTag  = label.new(na, na, "SELL ZONE", style = label.style_label_left, color = noCol, textcolor = bearCol, size = size.small)
+fmtP(float p) =>
+    str.tostring(p, format.mintick)
+// one decimal fewer than the tick, to keep the panel narrow (gold 4096.81, EURUSD 1.0842)
+pDec = math.max(0, math.round(-math.log10(syminfo.mintick)) - 1)
+fmtS(float p) =>
+    str.tostring(p, pDec == 0 ? "#" : "#." + str.repeat("0", pDec))
+
+if barstate.islast
+    // premium / discount
+    if showPDZ and not na(eqV)
+        x0 = math.min(lastSwHx, lastSwLx)
+        line.set_xy1(eqLine, x0, eqV)
+        line.set_xy2(eqLine, lblX, eqV)
+        label.set_xy(eqLbl, bar_index + 2, eqV)
+        label.set_text(eqLbl, "EQ 50% " + fmtP(eqV))
+        label.set_xy(premLbl, lastSwH >= lastSwL ? lastSwHx : lastSwLx, rHi)
+        label.set_xy(discLbl, lastSwH >= lastSwL ? lastSwLx : lastSwHx, rLo)
+
+    // best buy zone: closest demand at/below price (bases, bullish OBs, PDL); strong zones get a small edge
+    float bTop = na
+    float bBot = na
+    int   bLeft = na
+    string bType = ""
+    float bScore = na
+    if array.size(dBases) > 0
+        for i = 0 to array.size(dBases) - 1
+            b = array.get(dBases, i)
+            if box.get_bottom(b) <= close
+                sc = box.get_top(b) + (array.get(dStrong, i) ? 0.25 * atrV : 0.0)
+                if na(bScore) or sc > bScore
+                    bScore := sc
+                    bTop := box.get_top(b)
+                    bBot := box.get_bottom(b)
+                    bLeft := box.get_left(b)
+                    bType := array.get(dStrong, i) ? "Strong base" : "Base"
+    for b in bullBoxes
+        if box.get_bottom(b) <= close and (na(bScore) or box.get_top(b) > bScore)
+            bScore := box.get_top(b)
+            bTop := box.get_top(b)
+            bBot := box.get_bottom(b)
+            bLeft := box.get_left(b)
+            bType := "Order block"
+    if not na(pdl) and pdl <= close and (na(bScore) or pdl > bScore)
+        bScore := pdl
+        bTop := pdl
+        bBot := pdl - 0.1 * atrV
+        bLeft := nz(prevDayStart, dayStart)
+        bType := "PDL"
+
+    // best sell zone: closest supply at/above price (bases, bearish OBs, PDH)
+    float sTop = na
+    float sBot = na
+    int   sLeft = na
+    string sType = ""
+    float sScore = na
+    if array.size(sBases) > 0
+        for i = 0 to array.size(sBases) - 1
+            b = array.get(sBases, i)
+            if box.get_top(b) >= close
+                sc = box.get_bottom(b) - (array.get(sStrong, i) ? 0.25 * atrV : 0.0)
+                if na(sScore) or sc < sScore
+                    sScore := sc
+                    sTop := box.get_top(b)
+                    sBot := box.get_bottom(b)
+                    sLeft := box.get_left(b)
+                    sType := array.get(sStrong, i) ? "Strong base" : "Base"
+    for b in bearBoxes
+        if box.get_top(b) >= close and (na(sScore) or box.get_bottom(b) < sScore)
+            sScore := box.get_bottom(b)
+            sTop := box.get_top(b)
+            sBot := box.get_bottom(b)
+            sLeft := box.get_left(b)
+            sType := "Order block"
+    if not na(pdh) and pdh >= close and (na(sScore) or pdh < sScore)
+        sScore := pdh
+        sTop := pdh + 0.1 * atrV
+        sBot := pdh
+        sLeft := nz(prevDayStart, dayStart)
+        sType := "PDH"
+
+    if showKey
+        box.set_lefttop(buyHL, na(bTop) ? na : bLeft, bTop)
+        box.set_rightbottom(buyHL, na(bTop) ? na : lblX, bBot)
+        box.set_lefttop(sellHL, na(sTop) ? na : sLeft, sTop)
+        box.set_rightbottom(sellHL, na(sTop) ? na : lblX, sBot)
+        // thin zones (< 1 ATR tall): tag sits outside the box (buy below, sell above) so the border never crosses the text
+        bThin = not na(bTop) and bTop - bBot < atrV
+        sThin = not na(sTop) and sTop - sBot < atrV
+        label.set_xy(buyTag, na(bTop) ? na : bar_index + 2, na(bTop) ? na : bThin ? bBot : (bTop + bBot) / 2)
+        label.set_style(buyTag, bThin ? label.style_label_upper_left : label.style_label_left)
+        label.set_xy(sellTag, na(sTop) ? na : bar_index + 2, na(sTop) ? na : sThin ? sTop : (sTop + sBot) / 2)
+        label.set_style(sellTag, sThin ? label.style_label_lower_left : label.style_label_left)
+
+    // bias: H4 + D EMA trend and structure must all agree
+    nB = (h4Ok ? 2 : 0) + (d1Ok ? 2 : 0)
+    nBull = (h4Ok and h4Dir == 1 ? 1 : 0) + (h4Ok and h4St == 1 ? 1 : 0) + (d1Ok and d1Dir == 1 ? 1 : 0) + (d1Ok and d1St == 1 ? 1 : 0)
+    nBear = (h4Ok and h4Dir == -1 ? 1 : 0) + (h4Ok and h4St == -1 ? 1 : 0) + (d1Ok and d1Dir == -1 ? 1 : 0) + (d1Ok and d1St == -1 ? 1 : 0)
+    bias = nB == 0 ? 0 : nBull == nB ? 1 : nBear == nB ? -1 : 0
+    biasTxt = nB == 0 ? "n/a on this TF" : bias == 1 ? "▲ BULL (H4 + D)" : bias == -1 ? "▼ BEAR (H4 + D)" : "Mixed " + str.tostring(nBull) + " bull / " + str.tostring(nBear) + " bear"
+    locTxt = na(eqV) ? "—" : (inPremium ? "Premium " : "Discount ") + str.tostring(math.abs(close - eqV) / atrV, "#.#") + " ATR"
+    // PDH / PDL are single prices; bases and OBs show their range
+    buyTxt = na(bTop) ? "none below" : (bType == "PDL" ? fmtS(bTop) : fmtS(bBot) + "–" + fmtS(bTop)) + " " + bType + " · " + str.tostring(math.max(0, close - bTop) / atrV, "#.#") + " ATR"
+    sellTxt = na(sTop) ? "none above" : (sType == "PDH" ? fmtS(sBot) : fmtS(sBot) + "–" + fmtS(sTop)) + " " + sType + " · " + str.tostring(math.max(0, sBot - close) / atrV, "#.#") + " ATR"
+    string verdict = ""
+    color vCol = weakCol
+    if bias == 1 and not inPremium and not na(bTop)
+        verdict := "LOOK FOR BUYS at the buy zone"
+        vCol := bullCol
+    else if bias == -1 and inPremium and not na(sTop)
+        verdict := "LOOK FOR SELLS at the sell zone"
+        vCol := bearCol
+    else
+        verdict := bias == 0 ? "WAIT · HTF bias mixed" : bias == 1 ? (na(bTop) ? "WAIT · bull bias, no buy zone" : "WAIT · bull bias, in premium") : (na(sTop) ? "WAIT · bear bias, no sell zone" : "WAIT · bear bias, in discount")
+
+    if showMap
+        table.cell(panel, 0, 4, "Bias", text_color = weakCol, text_size = tSize, text_halign = text.align_left)
+        table.cell(panel, 1, 4, biasTxt, text_color = bias == 1 ? bullCol : bias == -1 ? bearCol : weakCol, text_size = tSize, text_halign = text.align_left)
+        table.merge_cells(panel, 1, 4, 3, 4)
+        table.cell(panel, 0, 5, "Loc", text_color = weakCol, text_size = tSize, text_halign = text.align_left)
+        table.cell(panel, 1, 5, locTxt, text_color = na(eqV) ? weakCol : inPremium ? bearCol : bullCol, text_size = tSize, text_halign = text.align_left)
+        table.merge_cells(panel, 1, 5, 3, 5)
+        table.cell(panel, 0, 6, "Buy", text_color = weakCol, text_size = tSize, text_halign = text.align_left)
+        table.cell(panel, 1, 6, buyTxt, text_color = bullCol, text_size = tSize, text_halign = text.align_left)
+        table.merge_cells(panel, 1, 6, 3, 6)
+        table.cell(panel, 0, 7, "Sell", text_color = weakCol, text_size = tSize, text_halign = text.align_left)
+        table.cell(panel, 1, 7, sellTxt, text_color = bearCol, text_size = tSize, text_halign = text.align_left)
+        table.merge_cells(panel, 1, 7, 3, 7)
+        table.cell(panel, 0, 8, verdict, bgcolor = color.new(vCol, 80), text_color = vCol, text_size = tSize)
+        table.merge_cells(panel, 0, 8, 3, 8)
+
+// ───────────────────────── Alerts ─────────────────────────
+alertcondition(bosUp or bosDn, "BOS", "TWI-VOB break of structure on {{ticker}} {{interval}}")
+alertcondition(chochUp or chochDn, "CHoCH", "TWI-VOB change of character on {{ticker}} {{interval}}")
+alertcondition(mssUp or mssDn, "MSS", "TWI-VOB market structure shift on {{ticker}} {{interval}}")
+alertcondition(bullOB and barstate.isconfirmed, "Bullish high-volume OB", "TWI-VOB bullish order block on {{ticker}} {{interval}}")
+alertcondition(bearOB and barstate.isconfirmed, "Bearish high-volume OB", "TWI-VOB bearish order block on {{ticker}} {{interval}}")
+alertcondition(upTrend and not upTrend[1], "Trend turned up", "TWI-VOB trend turned UP on {{ticker}} {{interval}}")
+alertcondition(not upTrend and upTrend[1], "Trend turned down", "TWI-VOB trend turned DOWN on {{ticker}} {{interval}}")
+alertcondition(upSteam or dnSteam, "Losing steam", "TWI-VOB trend losing steam on {{ticker}} {{interval}}")
+alertcondition(enteredBase, "Price entered a base zone", "TWI-VOB price entered a base zone on {{ticker}} {{interval}}")
+alertcondition(alignState != alignState[1] and barstate.isconfirmed, "HTF alignment changed", "TWI-VOB H1/H4/D alignment changed on {{ticker}}")

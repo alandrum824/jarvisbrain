@@ -1,0 +1,766 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TRAPPED TRADERS — Price Action Model  [UNVALIDATED]
+// ───────────────────────────────────────────────────────────────────────────────
+//  INDICATOR ONLY. No strategy orders. No automated execution. Not validated.
+//
+//  Model (inference-based — candles alone cannot show real trader positioning):
+//    OBVIOUS LEVEL → REACTION / POSITIONING INFERENCE → CONFIRMED BREAK → TRAP
+//    → MEANINGFUL MOVE AWAY → RETURN TO TRAP ZONE
+//
+//  At that point a trapped-trader setup EXISTS. Entry confirmations
+//  (engulfing, rejection wick, sweep/reclaim, HTF bias, R:R) are quality/entry
+//  filters — they are NOT required to recognize that a trap exists.
+//
+//  Bullish: likely shorts positioned at resistance → confirmed bullish break
+//    traps remaining shorts (they must buy to close) → price moves away →
+//    price returns → their buy-to-close orders may add order flow in the
+//    breakout direction, alongside new longs.
+//  Bearish: mirror image with likely longs at support.
+//
+//  NON-REPAINTING DESIGN:
+//    • All logic evaluates on confirmed (closed) bars only.
+//    • Pivots use ta.pivothigh/low with rightBars > 0 (confirmed pivots only).
+//    • request.security uses lookahead=barmerge.lookahead_off.
+//    • Once a trap zone is confirmed its coordinates are NEVER moved.
+// ═══════════════════════════════════════════════════════════════════════════════
+indicator("Trapped Traders — Price Action Model [UNVALIDATED]",
+     shorttitle="TT [UNVALIDATED]",
+     overlay=true,
+     max_boxes_count=200,
+     max_labels_count=200,
+     max_lines_count=50)
+
+// ═══════════════ INPUTS ═══════════════
+grpPiv  = "1 · Swings & obvious levels"
+leftBars     = input.int(5, "Pivot left bars", minval=1, group=grpPiv)
+rightBars    = input.int(3, "Pivot right bars (confirmation)", minval=1, group=grpPiv)
+promLookback = input.int(60, "Swing prominence lookback", minval=10, group=grpPiv)
+minPromAtr   = input.float(0.5, "Min swing prominence (× ATR)", minval=0, step=0.1, group=grpPiv)
+obvLookback  = input.int(150, "Level memory (bars)", minval=30, group=grpPiv)
+touchTolAtr  = input.float(0.25, "Touch / reaction tolerance (× ATR)", minval=0.05, step=0.05, group=grpPiv)
+eqTolAtr     = input.float(0.3, "Equal-high/low tolerance (× ATR)", minval=0.05, step=0.05, group=grpPiv)
+minReactions = input.int(1, "Min reactions before break (positioning inference)", minval=1, group=grpPiv)
+usePrevDay   = input.bool(true, "Include prior day high/low as obvious levels", group=grpPiv)
+
+grpBrk  = "2 · Break confirmation"
+atrLen      = input.int(14, "ATR length", group=grpBrk)
+breakBufAtr = input.float(0.1, "Buffer beyond level (× ATR)", minval=0, step=0.05, group=grpBrk)
+dispMult    = input.float(0.6, "Displacement body size (× ATR)", minval=0.1, step=0.1, group=grpBrk)
+
+grpZone = "3 · Trap zone & lifecycle"
+zonePadAtr   = input.float(0.2, "Trap zone half-height (× ATR)", minval=0.05, step=0.05, group=grpZone)
+moveAwayMult = input.float(1.0, "Meaningful move away (× ATR)", minval=0.2, step=0.1, group=grpZone)
+maxWaitBars  = input.int(50, "Max bars to wait for return (then PASS)", minval=5, group=grpZone)
+invBufAtr    = input.float(0.2, "Invalidation buffer (× ATR)", minval=0, step=0.05, group=grpZone)
+maxZones     = input.int(20, "Max zones kept", minval=1, maxval=50, group=grpZone)
+
+grpEntry = "4 · Entry confirmation (filters, NOT trap requirements)"
+entryMode   = input.string("Confirmation (default)", "Entry mode",
+     options=["Confirmation (default)", "Touch zone (aggressive)"], group=grpEntry)
+useWickRej  = input.bool(true, "Rejection wick", group=grpEntry)
+useEngulf   = input.bool(true, "Engulfing candle", group=grpEntry)
+useSweep    = input.bool(true, "Sweep below/above zone + reclaim", group=grpEntry)
+stopBufAtr  = input.float(0.3, "Stop beyond zone (× ATR)", minval=0, step=0.05, group=grpEntry)
+dedupeTolAtr= input.float(0.3, "Target dedupe tolerance (× ATR)", minval=0, step=0.05, group=grpEntry)
+
+grpQ    = "5 · Quality scoring"
+useHtf     = input.bool(false, "Include HTF bias in quality score", group=grpQ)
+htfTF      = input.timeframe("240", "HTF timeframe", group=grpQ)
+htfEmaLen  = input.int(50, "HTF EMA length", group=grpQ)
+
+grpAl   = "6 · Alerts"
+useAlerts = input.bool(true, "Alert on trap / retest / entry / invalidation", group=grpAl)
+
+// ═══════════════ CORE VARS ═══════════════
+atr = ta.atr(atrLen)
+tol = touchTolAtr * atr
+
+// Candidate obvious levels — resistance (r*) and support (s*)
+// kind: 0 = swing pivot, 1 = prior day high/low
+var array<float> rPx = array.new_float()
+var array<int>   rBar = array.new_int()
+var array<int>   rTouch = array.new_int()
+var array<int>   rKind = array.new_int()
+var array<bool>  rCluster = array.new_bool()
+var array<float> sPx = array.new_float()
+var array<int>   sBar = array.new_int()
+var array<int>   sTouch = array.new_int()
+var array<int>   sKind = array.new_int()
+var array<bool>  sCluster = array.new_bool()
+
+// Pivot pools for structural targets (never fabricated)
+var array<float> phPx = array.new_float()
+var array<int>   phBar = array.new_int()
+var array<float> plPx = array.new_float()
+var array<int>   plBar = array.new_int()
+
+// Trap zones — coordinates fixed at creation, never moved afterward
+// state: 0 TRAP_CONFIRMED · 1 WAITING_CONFIRMATION · 2 ENTRY_VALID · 3 INVALIDATED · 4 PASS
+var array<float> zTop = array.new_float()
+var array<float> zBot = array.new_float()
+var array<int>   zDir = array.new_int()       // +1 bullish (trapped shorts) · -1 bearish (trapped longs)
+var array<int>   zState = array.new_int()
+var array<int>   zBreakBar = array.new_int()
+var array<float> zExtreme = array.new_float() // furthest excursion after break
+var array<bool>  zArmed = array.new_bool()   // meaningful move away achieved
+var array<int>   zTouches = array.new_int()  // return touches (first = best)
+var array<bool>  zInside = array.new_bool()
+var array<int>   zReactions = array.new_int()
+var array<bool>  zCluster = array.new_bool()
+var array<float> zDisp = array.new_float()    // break-bar body
+var array<bool>  zAccept = array.new_bool()  // later close beyond zone (acceptance)
+var array<int>   zCons = array.new_int()     // consecutive closes on wrong side
+var array<float> zEntry = array.new_float()
+var array<float> zStop = array.new_float()
+var array<float> zTp1 = array.new_float()
+var array<float> zTp2 = array.new_float()
+var array<float> zTp3 = array.new_float()
+var array<float> zQ = array.new_float()
+var array<string> zTrig = array.new_string()
+var array<box>   zBox = array.new_box()
+
+ST_TRAP = 0
+ST_WAITCONF = 1
+ST_ENTRY = 2
+ST_INVALID = 3
+ST_PASS = 4
+
+bullCol = #089981
+bearCol = #f23645
+
+// Prior day high/low (confirmed values only, no lookahead)
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+pdl = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
+
+// HTF bias (optional quality input, confirmed values only)
+[htfC, htfE] = request.security(syminfo.tickerid, htfTF, [close, ta.ema(close, htfEmaLen)], lookahead=barmerge.lookahead_off)
+htfBull = not na(htfC) and not na(htfE) and htfC > htfE
+htfBear = not na(htfC) and not na(htfE) and htfC < htfE
+
+// ═══════════════ 1 · REGISTER CONFIRMED SWING LEVELS ═══════════════
+if barstate.isconfirmed
+    // --- swing highs → resistance candidates ---
+    ph = ta.pivothigh(high, leftBars, rightBars)
+    if not na(ph) and ph - ta.lowest(low, promLookback) >= minPromAtr * atr
+        cl = false
+        i = array.size(rPx) - 1
+        while i >= 0
+            if math.abs(array.get(rPx, i) - ph) <= eqTolAtr * atr
+                cl := true
+                array.set(rCluster, i, true)
+            i -= 1
+        array.push(rPx, ph)
+        array.push(rBar, bar_index - rightBars)
+        array.push(rTouch, 0)
+        array.push(rKind, 0)
+        array.push(rCluster, cl)
+        array.push(phPx, ph)
+        array.push(phBar, bar_index - rightBars)
+    // --- swing lows → support candidates ---
+    pl = ta.pivotlow(low, leftBars, rightBars)
+    if not na(pl) and ta.highest(high, promLookback) - pl >= minPromAtr * atr
+        cl2 = false
+        j = array.size(sPx) - 1
+        while j >= 0
+            if math.abs(array.get(sPx, j) - pl) <= eqTolAtr * atr
+                cl2 := true
+                array.set(sCluster, j, true)
+            j -= 1
+        array.push(sPx, pl)
+        array.push(sBar, bar_index - rightBars)
+        array.push(sTouch, 0)
+        array.push(sKind, 0)
+        array.push(sCluster, cl2)
+        array.push(plPx, pl)
+        array.push(plBar, bar_index - rightBars)
+
+    // --- prior day high/low as obvious levels (refreshed each day) ---
+    if usePrevDay and ta.change(time("D")) != 0
+        k = array.size(rPx) - 1
+        while k >= 0
+            if array.get(rKind, k) == 1
+                array.remove(rPx, k)
+                array.remove(rBar, k)
+                array.remove(rTouch, k)
+                array.remove(rKind, k)
+                array.remove(rCluster, k)
+            k -= 1
+        m = array.size(sPx) - 1
+        while m >= 0
+            if array.get(sKind, m) == 1
+                array.remove(sPx, m)
+                array.remove(sBar, m)
+                array.remove(sTouch, m)
+                array.remove(sKind, m)
+                array.remove(sCluster, m)
+            m -= 1
+        if not na(pdh)
+            array.push(rPx, pdh)
+            array.push(rBar, bar_index)
+            array.push(rTouch, 0)
+            array.push(rKind, 1)
+            array.push(rCluster, false)
+        if not na(pdl)
+            array.push(sPx, pdl)
+            array.push(sBar, bar_index)
+            array.push(sTouch, 0)
+            array.push(sKind, 1)
+            array.push(sCluster, false)
+
+    // --- expire stale candidate levels ---
+    e = array.size(rPx) - 1
+    while e >= 0
+        if bar_index - array.get(rBar, e) > obvLookback and array.get(rKind, e) == 0
+            array.remove(rPx, e)
+            array.remove(rBar, e)
+            array.remove(rTouch, e)
+            array.remove(rKind, e)
+            array.remove(rCluster, e)
+        e -= 1
+    f = array.size(sPx) - 1
+    while f >= 0
+        if bar_index - array.get(sBar, f) > obvLookback and array.get(sKind, f) == 0
+            array.remove(sPx, f)
+            array.remove(sBar, f)
+            array.remove(sTouch, f)
+            array.remove(sKind, f)
+            array.remove(sCluster, f)
+        f -= 1
+    // --- prune old target-pool pivots ---
+    g = array.size(phPx) - 1
+    while g >= 0
+        if bar_index - array.get(phBar, g) > obvLookback * 3
+            array.remove(phPx, g)
+            array.remove(phBar, g)
+        g -= 1
+    h = array.size(plPx) - 1
+    while h >= 0
+        if bar_index - array.get(plBar, h) > obvLookback * 3
+            array.remove(plPx, h)
+            array.remove(plBar, h)
+        h -= 1
+
+// ═══════════════ 2 · REACTION INFERENCE + CONFIRMED BREAK → TRAP ═══════════════
+// Positioning is INFERRED from observable reactions, never claimed as known.
+newBullZone = false
+newBullLvl = na
+newBearZone = false
+newBearLvl = na
+
+if barstate.isconfirmed
+    // --- count reactions at resistance (rejection / touch, close back below) ---
+    ri = array.size(rPx) - 1
+    while ri >= 0
+        lvl = array.get(rPx, ri)
+        if high >= lvl - tol and high <= lvl + tol and close < lvl
+            array.set(rTouch, ri, array.get(rTouch, ri) + 1)
+        ri -= 1
+    // --- count reactions at support ---
+    si = array.size(sPx) - 1
+    while si >= 0
+        lvl2 = array.get(sPx, si)
+        if low <= lvl2 + tol and low >= lvl2 - tol and close > lvl2
+            array.set(sTouch, si, array.get(sTouch, si) + 1)
+        si -= 1
+
+    // --- bullish breaks: confirmed body acceptance beyond resistance ---
+    bi = array.size(rPx) - 1
+    while bi >= 0
+        lvl = array.get(rPx, bi)
+        buf = breakBufAtr * atr
+        broke = close > lvl + buf and ((close - open) >= dispMult * atr or close[1] > lvl)
+        if broke and array.get(rTouch, bi) >= minReactions
+            // TRAP CONFIRMED — likely shorts positioned here are now trapped.
+            // Remaining trapped shorts must buy to close.
+            ztop = lvl + zonePadAtr * atr
+            zbot = lvl - zonePadAtr * atr
+            // cap stored zones (drop oldest finished one first)
+            if array.size(zTop) >= maxZones
+                drop = 0
+                di = 0
+                while di < array.size(zTop)
+                    if array.get(zState, di) >= ST_ENTRY
+                        drop := di
+                    di += 1
+                box.delete(array.get(zBox, drop))
+                array.remove(zTop, drop)
+                array.remove(zBot, drop)
+                array.remove(zDir, drop)
+                array.remove(zState, drop)
+                array.remove(zBreakBar, drop)
+                array.remove(zExtreme, drop)
+                array.remove(zArmed, drop)
+                array.remove(zTouches, drop)
+                array.remove(zInside, drop)
+                array.remove(zReactions, drop)
+                array.remove(zCluster, drop)
+                array.remove(zDisp, drop)
+                array.remove(zAccept, drop)
+                array.remove(zCons, drop)
+                array.remove(zEntry, drop)
+                array.remove(zStop, drop)
+                array.remove(zTp1, drop)
+                array.remove(zTp2, drop)
+                array.remove(zTp3, drop)
+                array.remove(zQ, drop)
+                array.remove(zTrig, drop)
+                array.remove(zBox, drop)
+            zb = box.new(bar_index, ztop, bar_index + 6, zbot,
+                 border_color=bullCol, border_width=1,
+                 bgcolor=color.new(bullCol, 88),
+                 text="TRAPPED SHORTS ZONE",
+                 text_size=size.tiny, text_color=bullCol)
+            array.push(zTop, ztop)
+            array.push(zBot, zbot)
+            array.push(zDir, 1)
+            array.push(zState, ST_TRAP)
+            array.push(zBreakBar, bar_index)
+            array.push(zExtreme, high)
+            array.push(zArmed, false)
+            array.push(zTouches, 0)
+            array.push(zInside, false)
+            array.push(zReactions, array.get(rTouch, bi))
+            array.push(zCluster, array.get(rCluster, bi))
+            array.push(zDisp, close - open)
+            array.push(zAccept, false)
+            array.push(zCons, 0)
+            array.push(zEntry, na)
+            array.push(zStop, na)
+            array.push(zTp1, na)
+            array.push(zTp2, na)
+            array.push(zTp3, na)
+            array.push(zQ, na)
+            array.push(zTrig, na)
+            array.push(zBox, zb)
+            newBullZone := true
+            newBullLvl := lvl
+            // level consumed → remove from candidates
+            array.remove(rPx, bi)
+            array.remove(rBar, bi)
+            array.remove(rTouch, bi)
+            array.remove(rKind, bi)
+            array.remove(rCluster, bi)
+        bi -= 1
+
+    // --- bearish breaks: confirmed body acceptance below support ---
+    bj = array.size(sPx) - 1
+    while bj >= 0
+        lvl = array.get(sPx, bj)
+        buf = breakBufAtr * atr
+        brokeDn = close < lvl - buf and ((open - close) >= dispMult * atr or close[1] < lvl)
+        if brokeDn and array.get(sTouch, bj) >= minReactions
+            // TRAP CONFIRMED — likely longs positioned here are now trapped.
+            // Remaining trapped longs must sell to close.
+            ztop = lvl + zonePadAtr * atr
+            zbot = lvl - zonePadAtr * atr
+            if array.size(zTop) >= maxZones
+                drop = 0
+                di = 0
+                while di < array.size(zTop)
+                    if array.get(zState, di) >= ST_ENTRY
+                        drop := di
+                    di += 1
+                box.delete(array.get(zBox, drop))
+                array.remove(zTop, drop)
+                array.remove(zBot, drop)
+                array.remove(zDir, drop)
+                array.remove(zState, drop)
+                array.remove(zBreakBar, drop)
+                array.remove(zExtreme, drop)
+                array.remove(zArmed, drop)
+                array.remove(zTouches, drop)
+                array.remove(zInside, drop)
+                array.remove(zReactions, drop)
+                array.remove(zCluster, drop)
+                array.remove(zDisp, drop)
+                array.remove(zAccept, drop)
+                array.remove(zCons, drop)
+                array.remove(zEntry, drop)
+                array.remove(zStop, drop)
+                array.remove(zTp1, drop)
+                array.remove(zTp2, drop)
+                array.remove(zTp3, drop)
+                array.remove(zQ, drop)
+                array.remove(zTrig, drop)
+                array.remove(zBox, drop)
+            zb2 = box.new(bar_index, ztop, bar_index + 6, zbot,
+                 border_color=bearCol, border_width=1,
+                 bgcolor=color.new(bearCol, 88),
+                 text="TRAPPED LONGS ZONE",
+                 text_size=size.tiny, text_color=bearCol)
+            array.push(zTop, ztop)
+            array.push(zBot, zbot)
+            array.push(zDir, -1)
+            array.push(zState, ST_TRAP)
+            array.push(zBreakBar, bar_index)
+            array.push(zExtreme, low)
+            array.push(zArmed, false)
+            array.push(zTouches, 0)
+            array.push(zInside, false)
+            array.push(zReactions, array.get(sTouch, bj))
+            array.push(zCluster, array.get(sCluster, bj))
+            array.push(zDisp, open - close)
+            array.push(zAccept, false)
+            array.push(zCons, 0)
+            array.push(zEntry, na)
+            array.push(zStop, na)
+            array.push(zTp1, na)
+            array.push(zTp2, na)
+            array.push(zTp3, na)
+            array.push(zQ, na)
+            array.push(zTrig, na)
+            array.push(zBox, zb2)
+            newBearZone := true
+            newBearLvl := lvl
+            array.remove(sPx, bj)
+            array.remove(sBar, bj)
+            array.remove(sTouch, bj)
+            array.remove(sKind, bj)
+            array.remove(sCluster, bj)
+        bj -= 1
+
+// ═══════════════ 3 · ZONE LIFECYCLE: MOVE AWAY → RETURN → CONFIRM / INVALIDATE ═══════════════
+retestBull = false
+retestBear = false
+entryBull = false
+entryBear = false
+invalBull = false
+invalBear = false
+
+if barstate.isconfirmed and array.size(zTop) > 0
+    zi = array.size(zTop) - 1
+    while zi >= 0
+        st = array.get(zState, zi)
+        if st == ST_TRAP or st == ST_WAITCONF
+            dir = array.get(zDir, zi)
+            ztop = array.get(zTop, zi)
+            zbot = array.get(zBot, zi)
+            zbx = array.get(zBox, zi)
+            box.set_right(zbx, bar_index + 6)
+            finished = false
+
+            // expiry → PASS
+            if bar_index - array.get(zBreakBar, zi) > maxWaitBars
+                array.set(zState, zi, ST_PASS)
+                box.set_bgcolor(zbx, color.new(color.gray, 90))
+                box.set_border_color(zbx, color.gray)
+                box.set_text(zbx, "EXPIRED — PASS")
+                finished := true
+
+            if not finished
+                if dir == 1
+                    // ---- bullish: trapped shorts ----
+                    ex = math.max(array.get(zExtreme, zi), high)
+                    array.set(zExtreme, zi, ex)
+                    if not array.get(zArmed, zi) and ex - ztop >= moveAwayMult * atr
+                        array.set(zArmed, zi, true)
+                    if not array.get(zAccept, zi) and bar_index > array.get(zBreakBar, zi) and close > ztop
+                        array.set(zAccept, zi, true)
+                    // structural invalidation (acceptance on wrong side, not one tiny close)
+                    below = close < zbot - invBufAtr * atr
+                    cons = array.get(zCons, zi)
+                    cons := below ? cons + 1 : 0
+                    array.set(zCons, zi, cons)
+                    bearDisp = (open - close) >= dispMult * atr
+                    if (below and bearDisp) or cons >= 2
+                        array.set(zState, zi, ST_INVALID)
+                        box.set_bgcolor(zbx, color.new(color.gray, 90))
+                        box.set_border_color(zbx, color.gray)
+                        box.set_text(zbx, "INVALIDATED")
+                        invalBull := true
+                        finished := true
+                    if not finished
+                        armed = array.get(zArmed, zi)
+                        inside = array.get(zInside, zi)
+                        touched = low <= ztop
+                        // return = first touch AFTER meaningful separation (speed doesn't matter)
+                        if armed and touched and not inside
+                            array.set(zInside, zi, true)
+                            array.set(zTouches, zi, array.get(zTouches, zi) + 1)
+                            if array.get(zState, zi) == ST_TRAP
+                                array.set(zState, zi, ST_WAITCONF)
+                                retestBull := true
+                                label.new(bar_index, low, "RETEST",
+                                     style=label.style_label_up, color=color.new(bullCol, 0),
+                                     textcolor=color.white, size=size.tiny)
+                        if not touched and high > ztop + tol
+                            array.set(zInside, zi, false)
+                        // entry confirmation — filters only, trap already exists
+                        if array.get(zState, zi) == ST_WAITCONF
+                            wickRej = useWickRej and low <= ztop and close > ztop and low > zbot - 2 * tol
+                            engulf = useEngulf and close[1] < open[1] and close > open and close >= open[1] and open <= close[1]
+                            sweep = useSweep and low < zbot and close > zbot
+                            trig = wickRej or engulf or sweep
+                            if trig or entryMode == "Touch zone (aggressive)"
+                                entry = close
+                                stop = zbot - stopBufAtr * atr
+                                // TP1: nearest visible swing high above entry (structural, never fabricated)
+                                tp1 = na
+                                pi = 0
+                                while pi < array.size(phPx)
+                                    px = array.get(phPx, pi)
+                                    if px > entry and (na(tp1) or px < tp1)
+                                        tp1 := px
+                                    pi += 1
+                                tp2 = ex  // breakout extreme
+                                // TP3: next visible swing high above TP2, else prior day high
+                                tp3 = na
+                                pj = 0
+                                while pj < array.size(phPx)
+                                    px2 = array.get(phPx, pj)
+                                    ref = na(tp2) ? entry : tp2
+                                    if px2 > ref and (na(tp3) or px2 < tp3)
+                                        tp3 := px2
+                                    pj += 1
+                                if na(tp3) and usePrevDay and not na(pdh) and pdh > entry
+                                    tp3 := pdh
+                                // dedupe targets that resolve to the same level
+                                if not na(tp1) and not na(tp2) and math.abs(tp2 - tp1) <= dedupeTolAtr * atr
+                                    tp2 := na
+                                if not na(tp3)
+                                    if not na(tp2) and math.abs(tp3 - tp2) <= dedupeTolAtr * atr
+                                        tp3 := na
+                                    else if not na(tp1) and math.abs(tp3 - tp1) <= dedupeTolAtr * atr
+                                        tp3 := na
+                                // quality score
+                                q = 5.0
+                                q += array.get(zReactions, zi) >= 2 ? 1 : 0
+                                q += array.get(zCluster, zi) ? 1 : 0
+                                q += array.get(zDisp, zi) >= 2 * dispMult * atr ? 1 : 0
+                                q += array.get(zAccept, zi) ? 1 : 0
+                                q += (ex - ztop) >= 2 * moveAwayMult * atr ? 1 : 0
+                                q += array.get(zTouches, zi) == 1 ? 1 : 0
+                                q += useHtf and htfBull ? 1 : 0
+                                tn = array.get(zTouches, zi)
+                                q -= tn >= 3 ? 2 : tn == 2 ? 1 : 0
+                                q := math.max(0, math.min(10, q))
+                                array.set(zEntry, zi, entry)
+                                array.set(zStop, zi, stop)
+                                array.set(zTp1, zi, tp1)
+                                array.set(zTp2, zi, tp2)
+                                array.set(zTp3, zi, tp3)
+                                trigName = wickRej ? "Rejection wick" : engulf ? "Engulfing" : sweep ? "Sweep + reclaim" : "Aggressive touch"
+                                array.set(zQ, zi, q)
+                                array.set(zTrig, zi, trigName)
+                                array.set(zState, zi, ST_ENTRY)
+                                box.set_text(zbx, "TRAPPED SHORTS ZONE — ENTRY")
+                                label.new(bar_index, low, "LONG",
+                                     style=label.style_label_up, color=color.new(bullCol, 0),
+                                     textcolor=color.white, size=size.small)
+                                entryBull := true
+                else
+                    // ---- bearish: trapped longs ----
+                    exd = math.min(array.get(zExtreme, zi), low)
+                    array.set(zExtreme, zi, exd)
+                    if not array.get(zArmed, zi) and zbot - exd >= moveAwayMult * atr
+                        array.set(zArmed, zi, true)
+                    if not array.get(zAccept, zi) and bar_index > array.get(zBreakBar, zi) and close < zbot
+                        array.set(zAccept, zi, true)
+                    above = close > ztop + invBufAtr * atr
+                    consb = array.get(zCons, zi)
+                    consb := above ? consb + 1 : 0
+                    array.set(zCons, zi, consb)
+                    bullDisp = (close - open) >= dispMult * atr
+                    if (above and bullDisp) or consb >= 2
+                        array.set(zState, zi, ST_INVALID)
+                        box.set_bgcolor(zbx, color.new(color.gray, 90))
+                        box.set_border_color(zbx, color.gray)
+                        box.set_text(zbx, "INVALIDATED")
+                        invalBear := true
+                        finished := true
+                    if not finished
+                        armedb = array.get(zArmed, zi)
+                        insideb = array.get(zInside, zi)
+                        touchedb = high >= zbot
+                        if armedb and touchedb and not insideb
+                            array.set(zInside, zi, true)
+                            array.set(zTouches, zi, array.get(zTouches, zi) + 1)
+                            if array.get(zState, zi) == ST_TRAP
+                                array.set(zState, zi, ST_WAITCONF)
+                                retestBear := true
+                                label.new(bar_index, high, "RETEST",
+                                     style=label.style_label_down, color=color.new(bearCol, 0),
+                                     textcolor=color.white, size=size.tiny)
+                        if not touchedb and low < zbot - tol
+                            array.set(zInside, zi, false)
+                        if array.get(zState, zi) == ST_WAITCONF
+                            wickRejB = useWickRej and high >= zbot and close < zbot and high < ztop + 2 * tol
+                            engulfB = useEngulf and close[1] > open[1] and close < open and close <= open[1] and open >= close[1]
+                            sweepB = useSweep and high > ztop and close < ztop
+                            trigB = wickRejB or engulfB or sweepB
+                            if trigB or entryMode == "Touch zone (aggressive)"
+                                entryB = close
+                                stopB = ztop + stopBufAtr * atr
+                                tp1b = na
+                                qi = 0
+                                while qi < array.size(plPx)
+                                    px3 = array.get(plPx, qi)
+                                    if px3 < entryB and (na(tp1b) or px3 > tp1b)
+                                        tp1b := px3
+                                    qi += 1
+                                tp2b = exd
+                                tp3b = na
+                                qj = 0
+                                while qj < array.size(plPx)
+                                    px4 = array.get(plPx, qj)
+                                    refb = na(tp2b) ? entryB : tp2b
+                                    if px4 < refb and (na(tp3b) or px4 > tp3b)
+                                        tp3b := px4
+                                    qj += 1
+                                if na(tp3b) and usePrevDay and not na(pdl) and pdl < entryB
+                                    tp3b := pdl
+                                if not na(tp1b) and not na(tp2b) and math.abs(tp2b - tp1b) <= dedupeTolAtr * atr
+                                    tp2b := na
+                                if not na(tp3b)
+                                    if not na(tp2b) and math.abs(tp3b - tp2b) <= dedupeTolAtr * atr
+                                        tp3b := na
+                                    else if not na(tp1b) and math.abs(tp3b - tp1b) <= dedupeTolAtr * atr
+                                        tp3b := na
+                                qb = 5.0
+                                qb += array.get(zReactions, zi) >= 2 ? 1 : 0
+                                qb += array.get(zCluster, zi) ? 1 : 0
+                                qb += array.get(zDisp, zi) >= 2 * dispMult * atr ? 1 : 0
+                                qb += array.get(zAccept, zi) ? 1 : 0
+                                qb += (zbot - exd) >= 2 * moveAwayMult * atr ? 1 : 0
+                                qb += array.get(zTouches, zi) == 1 ? 1 : 0
+                                qb += useHtf and htfBear ? 1 : 0
+                                tnb = array.get(zTouches, zi)
+                                qb -= tnb >= 3 ? 2 : tnb == 2 ? 1 : 0
+                                qb := math.max(0, math.min(10, qb))
+                                array.set(zEntry, zi, entryB)
+                                array.set(zStop, zi, stopB)
+                                array.set(zTp1, zi, tp1b)
+                                array.set(zTp2, zi, tp2b)
+                                array.set(zTp3, zi, tp3b)
+                                trigNameB = wickRejB ? "Rejection wick" : engulfB ? "Engulfing" : sweepB ? "Sweep + reclaim" : "Aggressive touch"
+                                array.set(zQ, zi, qb)
+                                array.set(zTrig, zi, trigNameB)
+                                array.set(zState, zi, ST_ENTRY)
+                                box.set_text(zbx, "TRAPPED LONGS ZONE — ENTRY")
+                                label.new(bar_index, high, "SHORT",
+                                     style=label.style_label_down, color=color.new(bearCol, 0),
+                                     textcolor=color.white, size=size.small)
+                                entryBear := true
+        zi -= 1
+
+// ═══════════════ 4 · DASHBOARD + ALERTS ═══════════════
+var table dash = table.new(position.top_right, 2, 18, border_width=1, border_color=color.gray)
+
+statusTxt(s) =>
+    s == ST_TRAP ? "TRAP CONFIRMED — waiting for retest" :
+     s == ST_WAITCONF ? "WAITING FOR CONFIRMATION" :
+     s == ST_ENTRY ? "ENTRY VALID" :
+     s == ST_INVALID ? "INVALIDATED" : "PASS / EXPIRED"
+
+fmtPx(v) => na(v) ? "N/A" : str.tostring(v, format.mintick)
+
+qClass(q) =>
+    na(q) ? "—" :
+     q >= 9 ? "A+ setup" :
+     q >= 8 ? "A setup" :
+     q >= 7 ? "B setup" :
+     q >= 6 ? "marginal" : "PASS"
+
+if barstate.isconfirmed
+    // pick: newest active zone, else newest entry
+    pick = -1
+    pz = array.size(zTop) - 1
+    while pz >= 0
+        s0 = array.get(zState, pz)
+        if (s0 == ST_TRAP or s0 == ST_WAITCONF) and pick < 0
+            pick := pz
+        pz -= 1
+    if pick < 0
+        qz = array.size(zTop) - 1
+        while qz >= 0
+            if array.get(zState, qz) == ST_ENTRY and pick < 0
+                pick := qz
+            qz -= 1
+
+    table.cell(dash, 0, 0, "TRAPPED TRADERS", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, "[UNVALIDATED]", text_color=color.orange, text_size=size.small)
+    if pick >= 0
+        dir = array.get(zDir, pick)
+        bull = dir == 1
+        ztop = array.get(zTop, pick)
+        zbot = array.get(zBot, pick)
+        lvlMid = (ztop + zbot) / 2
+        st = array.get(zState, pick)
+        entry = array.get(zEntry, pick)
+        stop = array.get(zStop, pick)
+        tp1 = array.get(zTp1, pick)
+        tp2 = array.get(zTp2, pick)
+        tp3 = array.get(zTp3, pick)
+        q = array.get(zQ, pick)
+        touches = array.get(zTouches, pick)
+        armed = array.get(zArmed, pick)
+        reacts = array.get(zReactions, pick)
+        dispA = math.abs(array.get(zDisp, pick)) / atr
+        rr = na(tp1) or na(entry) or na(stop) or (bull ? entry - stop : stop - entry) <= 0 ? na :
+             bull ? (tp1 - entry) / (entry - stop) : (entry - tp1) / (stop - entry)
+        whyTrap = bull ?
+             "Likely shorts positioned ~" + fmtPx(lvlMid) + " (" + str.tostring(reacts) + " reactions); confirmed break trapped remaining shorts — must buy to close." :
+             "Likely longs positioned ~" + fmtPx(lvlMid) + " (" + str.tostring(reacts) + " reactions); confirmed break trapped remaining longs — must sell to close."
+        retStatus = st == ST_TRAP ? (armed ? "Waiting for return (moved away ✓)" : "Waiting for meaningful move away") :
+             st == ST_WAITCONF ? "Returned — touch #" + str.tostring(touches) + ", awaiting confirmation" :
+             st == ST_ENTRY ? "Confirmed" : "—"
+        table.cell(dash, 0, 1, "Direction", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 1, bull ? "LONG" : "SHORT", text_color=bull ? bullCol : bearCol, text_size=size.tiny)
+        table.cell(dash, 0, 2, "Trap type", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 2, bull ? "TRAPPED SHORTS" : "TRAPPED LONGS", text_size=size.tiny)
+        table.cell(dash, 0, 3, "Original level", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 3, fmtPx(lvlMid), text_size=size.tiny)
+        table.cell(dash, 0, 4, "Trap zone", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 4, fmtPx(zbot) + " – " + fmtPx(ztop), text_size=size.tiny)
+        table.cell(dash, 0, 5, "Why trapped", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 5, whyTrap, text_size=size.tiny)
+        table.cell(dash, 0, 6, "Breakout", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 6, "Close beyond level, body ≈" + str.tostring(dispA, "#.#") + " ATR", text_size=size.tiny)
+        table.cell(dash, 0, 7, "Return status", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 7, retStatus, text_size=size.tiny)
+        table.cell(dash, 0, 8, "Entry trigger", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 8, st == ST_ENTRY ? array.get(zTrig, pick) : "—", text_size=size.tiny)
+        table.cell(dash, 0, 9, "Entry", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 9, fmtPx(entry), text_size=size.tiny)
+        table.cell(dash, 0, 10, "Stop", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 10, fmtPx(stop), text_size=size.tiny)
+        table.cell(dash, 0, 11, "TP1 / TP2 / TP3", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 11, fmtPx(tp1) + " / " + fmtPx(tp2) + " / " + fmtPx(tp3), text_size=size.tiny)
+        table.cell(dash, 0, 12, "R:R (vs TP1)", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 12, na(rr) ? "N/A" : "1 : " + str.tostring(rr, "#.##"), text_size=size.tiny)
+        table.cell(dash, 0, 13, "Quality", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 13, (na(q) ? "—" : str.tostring(q, "#") + " / 10 — " + qClass(q)), text_size=size.tiny)
+        table.cell(dash, 0, 14, "Status", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 14, statusTxt(st), text_size=size.tiny)
+        table.cell(dash, 0, 15, "Note", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 15, "Inference only — not actual order flow.", text_color=color.orange, text_size=size.tiny)
+        table.cell(dash, 0, 16, "", text_size=size.tiny)
+        table.cell(dash, 1, 16, "", text_size=size.tiny)
+        table.cell(dash, 0, 17, "", text_size=size.tiny)
+        table.cell(dash, 1, 17, "", text_size=size.tiny)
+    else
+        table.cell(dash, 0, 1, "Status", text_color=color.gray, text_size=size.tiny)
+        table.cell(dash, 1, 1, "PASS — no clear trapped-trader setup", text_size=size.tiny)
+        r = 2
+        while r < 18
+            table.cell(dash, 0, r, "", text_size=size.tiny)
+            table.cell(dash, 1, r, "", text_size=size.tiny)
+            r += 1
+
+// ── alerts (dynamic-message alerts; enable "Any alert() function call") ──
+if useAlerts and barstate.isconfirmed
+    if newBullZone
+        alert("Trapped-trader [UNVALIDATED]: likely SHORTS trapped at " + str.tostring(newBullLvl, format.mintick) + ". Waiting for move away + return. Not a trade signal.", alert.freq_once_per_bar_close)
+    if newBearZone
+        alert("Trapped-trader [UNVALIDATED]: likely LONGS trapped at " + str.tostring(newBearLvl, format.mintick) + ". Waiting for move away + return. Not a trade signal.", alert.freq_once_per_bar_close)
+    if retestBull
+        alert("Trapped-trader [UNVALIDATED]: price returned to trapped-shorts zone. Waiting for entry confirmation.", alert.freq_once_per_bar_close)
+    if retestBear
+        alert("Trapped-trader [UNVALIDATED]: price returned to trapped-longs zone. Waiting for entry confirmation.", alert.freq_once_per_bar_close)
+    if entryBull
+        alert("Trapped-trader [UNVALIDATED]: LONG entry trigger at trapped-shorts zone. Check dashboard for stop/targets. Not financial advice.", alert.freq_once_per_bar_close)
+    if entryBear
+        alert("Trapped-trader [UNVALIDATED]: SHORT entry trigger at trapped-longs zone. Check dashboard for stop/targets. Not financial advice.", alert.freq_once_per_bar_close)
+    if invalBull or invalBear
+        alert("Trapped-trader [UNVALIDATED]: setup invalidated on structural acceptance.", alert.freq_once_per_bar_close)

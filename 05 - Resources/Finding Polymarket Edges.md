@@ -75,6 +75,21 @@ Markets were verified genuinely live, not stale: `acceptingOrders` true, order b
 
 **So where could real edge actually live?** Not in marquee, liquid, pre-priced games. The remaining candidates worth testing, none yet validated: stale prices in the minutes after real news (lineup scratches, weather, late injury), the reopen window right after a maintenance outage before the book re-syncs, genuinely thin or novel markets that no sharp book prices at all, and live in-game pricing. Each of these needs the same treatment this hypothesis got — measured against sharp fair value before being trusted.
 
+## Competitor research: AI pick apps vs market-math tools (2026-10-09)
+Prompted by a Facebook ad for **DeepChamp: Live Sports Intel** ("ChatGPT for sports intelligence").
+- **DeepChamp** (Inova Platforms): LLM pick app ("BetGPT" voice/text/image chat), covers every major sport plus prediction markets, $6.99/week up to $199.99/year, 4.7 stars from about 1,100 ratings. **It publishes no track record and no CLV.** Reviewers complain about stale rosters (traded players analyzed on their old team) and slow "live" injury updates. Its own ad mockup says "Last updated 14h ago". What it sells is the experience, not an edge.
+- **Same category:** Rithmm (custom AI models + picks), TipsPro ("~80% accuracy", a red flag), ZCode, SportBot AI (does publish a public accuracy page).
+- **Where the professionals pay:** OddsJam ($199–299/mo: +EV and arbitrage vs. a sharp consensus) and Unabated (the "Unabated Line" = vig-free consensus of the sharpest books; reported ~$3,000/mo for API). **They sell what PolyEdge already does: book prices compared to a de-vigged sharp consensus.** None of them sells a better prediction model.
+- **Evidence against prediction-first:**
+  - An LLM forecasting swarm scored a Brier of 0.38 against Polymarket's 0.30.
+  - Copy-trading the top Polymarket wallets lost ~13.6%.
+  - 10 strategies over 10 months / 600 liquid markets all failed after ~2% fees (Action Network, Reddit test).
+  - Our own 2,080-game MLB backtest: market log-loss 0.678 vs team model 0.688.
+- **The favorite-longshot bias does NOT exist in Polymarket sports** (Cardozo & Rivero-Wildemauwe, arXiv 2609.12878: 588M trades). In crypto and politics, longshots lose 13–46%. In sports, longshots under 10¢ had a positive point estimate and favorites at 90¢+ returned −0.23% (equal weight). Sports prices are the best calibrated on the platform, so "fade longshots / buy heavy favorites" is not an edge there. Our 15–85¢ band is about de-vig noise, not a bias trade.
+- **Conclusion:** the edge is **price and timing, not prediction**. Buy only when the Polymarket US ask is below the power-devigged sharp consensus, judge the system by CLV (not win rate), and size small. The one untested place a real edge probably lives is **lag**: the books move on news or sharp money and Polymarket US's retail book hasn't repriced yet (see "where could real edge actually live" above). Measuring it needs fast line data; the free Odds API (500/mo) and SportsGameOdds (10-min, 2,500/mo) tiers are too slow to catch a lag directly.
+- Worth stealing from DeepChamp, as UX only: a chat that explains a card in plain English, favorite-team personalization, and line-movement alerts.
+
 ## Related
+- [[PolyEdge]] — the live Base44 board that runs this method (market-as-prior engine).
 - [[PolyEdge (Grok Build)]] — the app that automates this, plus the 2026-09-14 diagnosis of why its Polymarket feed reads OFFLINE.
 - [[Polymarket (Prediction Markets)]], [[Public ESPN API]] — the underlying free data sources.

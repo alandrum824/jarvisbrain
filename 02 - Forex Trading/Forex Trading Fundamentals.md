@@ -27,12 +27,28 @@ Standard practice matches what's already built: define the range from the **firs
 
 ## ICT / Smart Money Concepts (ties directly to Adam's own terminology)
 
-These match what's already logged in [[Chart Analysis Notes#Terminology Adam uses]] and what's coded into [[TWI True North]] and [[TWI Sniper ORB]] — confirming Adam's playbook is built on real, named concepts, not invented vocabulary:
+Full OB/FVG treatment (definitions, A+ checklist, evidence) now lives in [[Order Block and FVG Playbook]]; the bullets below are the short version. These match what's already logged in [[Chart Analysis Notes#Terminology Adam uses]] and what's coded into [[TWI True North]] and [[TWI Sniper ORB]] — confirming Adam's playbook is built on real, named concepts, not invented vocabulary:
 
 - **Order Block (OB):** the last opposing-direction candle immediately before an impulsive move that breaks structure. A fresh institutional footprint — price often returns to it once before continuing.
 - **Fair Value Gap (FVG):** a three-candle gap — a literal price void between candle 1's high and candle 3's low, created by a fast move. Price often revisits these to "rebalance" before continuing. This is exactly what `ScanPOI()` hunts for in [[TWI Sniper ORB]].
 - **Liquidity Sweep:** a wick that pushes past a prior high/low — clearing resting stop orders — immediately before a reversal. Same concept as the "Sell Side/Buy Side Liquidity" sweep in Adam's Sweep+MSS+Fib+OB framework, and one of [[TWI True North]]'s 10 scored confluences.
 - **Breaker Block (new to the vault, not yet used anywhere):** a *failed* order block — price closed through it, took the liquidity beyond it, and now the same zone flips to work as support/resistance in the opposite direction. Genuinely different from a plain OB (which is a continuation zone) — a breaker is a reversal zone born from a failure. Not currently a confluence in either indicator. Per the standing 2026-08-19 decision that indicator complexity is capped and new ideas have to earn their place against a cut, this isn't a "just add it" — flag it to Adam as a candidate only if a real setup shows the existing 10 confluences missed something a breaker would have caught.
+
+## Support & resistance — the standard playbook, and what our tests say (2026-10-11)
+Source: Adam sent an "Orby" futures S/R trading-guide graphic (Thai Ly, labelled AI content).
+- **Concepts:** support and resistance are zones, not lines. They get stronger with more touches, and higher-timeframe levels matter more.
+- **Level types:** prior swing highs/lows, round numbers, consolidation zones, session highs/lows, broken-and-retested levels, trendlines, HTF zones.
+- **Process:** identify → wait for price to reach the level → confirm (rejection candle, volume) → execute with the stop just beyond the level → manage → review.
+- **Trades:**
+  - Bounce: buy rejection at support, sell rejection at resistance.
+  - Breakout & retest: clean break → retest → enter on confirmation.
+  - Fakeout: a break that fails, so enter in the opposite direction.
+- **Measured here** (details in [[EA Scorecard]]):
+  - Generic S/R entries (breakout → retest → reclaim, demand/supply bounces, fakeouts) mostly failed or stayed too thin. See [[TWI SR Sweep Reclaim]], [[TWI ORB Demand Pullback]], [[TWI Gold Zone Ladder]], and the zone-control results in [[Order Block and FVG Playbook]].
+  - The S/R ideas that did show something:
+    - **STRIKE on NAS100:** a 4H level touch, then a rejection, then a higher-low entry, positive in 5 of 5 years.
+    - **Session-open momentum:** [[TWI ORB Momentum]].
+  - **Lesson:** a level marks where to look, not a reason to trade. Confirmation and session timing decide the outcome; the level alone does not.
 
 ## Standing gotchas already banked elsewhere (pointers, not repeated here)
 

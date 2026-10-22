@@ -1,0 +1,746 @@
+//@version=6
+// TWI Trapped Traders  v1.0  - UNVALIDATED. Identifies the sequence only; places no trades.
+// Core (defines "trapped"): level -> evidence traders reacted there -> breakout/trap -> move away -> return.
+// Confirmation, score, HTF, CHoCH/BOS, first-retest and R:R are FILTERS: they only decide whether ENTRY VALID fires
+// and can be switched off without changing whether a trap is detected.
+// Non-repainting: all state changes run on confirmed bars only, pivots are used only after they are confirmed,
+// no lookahead on the chart's own data, the trap zone is frozen at the moment the trap is confirmed.
+// Bullish = trapped SHORTS (resistance broke up). Bearish = trapped LONGS (support broke down).
+indicator("TWI Trapped Traders (UNVALIDATED)", shorttitle = "TWI Trapped", overlay = true, max_boxes_count = 150, max_lines_count = 450, max_labels_count = 400, max_bars_back = 1500)
+
+// ============================== inputs ==============================
+grpG = "General"
+atrLen   = input.int(14, "ATR length", minval = 1, group = grpG)
+showBull = input.bool(true, "Trapped shorts (bullish setups)", group = grpG)
+showBear = input.bool(true, "Trapped longs (bearish setups)", group = grpG)
+dbgOn    = input.bool(false, "Debug mode (show why candidates advance or stall)", group = grpG)
+maxKeep  = input.int(14, "Setups kept on chart", minval = 3, maxval = 40, group = grpG)
+
+grpL = "1. Obvious level"
+pivL        = input.int(5, "Swing left bars (repeated levels)", minval = 1, group = grpL)
+pivR        = input.int(3, "Swing right bars (confirmation delay)", minval = 1, group = grpL)
+majL        = input.int(12, "Prominent swing left bars", minval = 2, group = grpL)
+majR        = input.int(6, "Prominent swing right bars", minval = 1, group = grpL)
+useMajorSingle = input.bool(true, "A prominent swing alone is a level", group = grpL)
+useRepeated = input.bool(true, "A repeated level (2+ swings) is a level", group = grpL)
+usePD       = input.bool(true, "Prior-day high/low are candidates (need a reaction first)", group = grpL)
+tolATR      = input.float(0.20, "Zone tolerance (x ATR)", minval = 0.02, step = 0.05, group = grpL)
+lookbackLvl = input.int(300, "Level lookback (bars)", minval = 20, group = grpL)
+pdReactATR  = input.float(0.30, "Prior-day level: rejection close back (x ATR)", minval = 0.0, step = 0.05, group = grpL)
+
+grpT = "2. Trap (breakout)"
+beyondATR   = input.float(0.10, "Close must be beyond the zone by (x ATR)", minval = 0.0, step = 0.05, group = grpT)
+brkBodyATR  = input.float(0.50, "Breakout candle body >= (x ATR)", minval = 0.0, step = 0.05, group = grpT)
+acceptBars  = input.int(2, "...or this many consecutive closes beyond", minval = 1, group = grpT)
+moveATR     = input.float(0.75, "Moved away >= (x ATR beyond the zone)", minval = 0.1, step = 0.05, group = grpT)
+maxCandAge  = input.int(500, "Level expires after (bars without a trap)", minval = 20, group = grpT)
+maxSetupAge = input.int(300, "Trap expires after (bars)", minval = 20, group = grpT)
+
+grpR = "3. Return, confirmation (entry filter)"
+retestWindow = input.int(10, "Retest window (bars)", minval = 1, group = grpR)
+leaveATR     = input.float(0.50, "Retest ends if price leaves by (x ATR)", minval = 0.1, step = 0.1, group = grpR)
+maxRetests   = input.int(3, "PASS after this many retests", minval = 1, group = grpR)
+cWick   = input.bool(true, "Confirm: rejection wick", group = grpR)
+cEngulf = input.bool(true, "Confirm: engulfing", group = grpR)
+cStrong = input.bool(true, "Confirm: strong close", group = grpR)
+cSweep  = input.bool(true, "Confirm: sweep of the zone then reclaim", group = grpR)
+wickRatio    = input.float(0.40, "Rejection wick >= (share of range)", minval = 0.1, maxval = 0.9, step = 0.05, group = grpR)
+strongBodyATR = input.float(0.50, "Strong close body >= (x ATR)", minval = 0.1, step = 0.05, group = grpR)
+
+grpI = "4. Structural invalidation"
+invAccept   = input.int(3, "Invalid after N consecutive closes on the wrong side", minval = 1, group = grpI)
+invBeyondATR = input.float(0.10, "...each beyond the zone by (x ATR)", minval = 0.0, step = 0.05, group = grpI)
+invDispATR  = input.float(1.00, "...or one displacement candle body >= (x ATR) closing beyond", minval = 0.3, step = 0.1, group = grpI)
+
+grpS = "5. Stop and targets (N/A if not structural)"
+stopBufATR  = input.float(0.10, "Stop buffer beyond structure (x ATR)", minval = 0.0, step = 0.05, group = grpS)
+minRiskATR  = input.float(0.15, "Min structural risk (x ATR)", minval = 0.0, step = 0.05, group = grpS)
+maxRiskATR  = input.float(4.0, "Max structural risk (x ATR), else stop = N/A", minval = 0.5, step = 0.5, group = grpS)
+minTpATR    = input.float(0.50, "Target must be beyond entry by (x ATR)", minval = 0.1, step = 0.1, group = grpS)
+dedupATR    = input.float(0.15, "Targets closer than this are merged (x ATR)", minval = 0.0, step = 0.05, group = grpS)
+
+grpF = "6. Quality filters (never change trap detection)"
+useFilters = input.bool(true, "Master switch: apply quality filters to ENTRY VALID", group = grpF)
+useScore   = input.bool(true, "Require score >=", inline = "sc", group = grpF)
+minScore   = input.int(7, "", minval = 0, maxval = 10, inline = "sc", group = grpF)
+useFirst   = input.bool(true, "First clean retest only", group = grpF)
+useRR      = input.bool(true, "Require R:R to TP1 >=", inline = "rr", group = grpF)
+minRR      = input.float(1.5, "", minval = 0.5, step = 0.25, inline = "rr", group = grpF)
+useHTF     = input.bool(false, "Require higher-timeframe agreement", group = grpF)
+htfTf      = input.timeframe("240", "HTF for bias", group = grpF)
+htfEma     = input.int(50, "HTF bias EMA length", minval = 5, group = grpF)
+useChoch   = input.bool(false, "Require minor structure break (BOS) on the chart timeframe", group = grpF)
+chopBars   = input.int(12, "Score: chop if move-away takes more than (bars)", minval = 2, group = grpF)
+
+grpD = "Display"
+bullCol  = input.color(#2DE2A6, "Bullish color", group = grpD)
+bearCol  = input.color(#FF5C6C, "Bearish color", group = grpD)
+tblOn    = input.bool(true, "Setup table", group = grpD)
+tblPos   = input.string("Top right", "Table position", options = ["Top right", "Top left", "Bottom right", "Bottom left", "Middle right"], group = grpD)
+extBars  = input.int(30, "Entry/stop/target line length (bars)", minval = 5, group = grpD)
+
+// ============================== types and state ==============================
+type Setup
+    int id = 0
+    int dir = 0
+    float zTop = na
+    float zBot = na
+    float cMax = na
+    float cMin = na
+    int touches = 1
+    bool major = false
+    bool pdLevel = false
+    bool reacted = false
+    int firstBar = na
+    int lastBar = na
+    int state = 0
+    int trapBar = na
+    float atrT = na
+    float brkBody = 0.0
+    float brkBeyond = 0.0
+    int accCnt = 0
+    int accAtTrap = 0
+    float extreme = na
+    bool moved = false
+    int moveBar = na
+    int retests = 0
+    bool inRetest = false
+    int retestStart = na
+    float retestExt = na
+    bool swept = false
+    bool chochSeen = false
+    bool structOK = false
+    bool confPassed = false
+    bool confFailed = false
+    string confName = ""
+    int wrongCnt = 0
+    float entry = na
+    float stop = na
+    float tp1 = na
+    float tp2 = na
+    float tp3 = na
+    float rr = na
+    int score = na
+    string scoreNote = ""
+    string why = ""
+    string trapWhy = ""
+    string reason = ""
+    int entryBar = na
+    int result = 0
+    bool drawnFinal = false
+    box zbox = na
+    label slbl = na
+    array<line> lns = na
+    array<label> lbs = na
+
+var array<Setup> setups = array.new<Setup>()
+var array<int> idc = array.from(0)
+var array<float> minHP = array.new<float>()
+var array<int> minHB = array.new<int>()
+var array<float> minLP = array.new<float>()
+var array<int> minLB = array.new<int>()
+var array<float> majHP = array.new<float>()
+var array<int> majHB = array.new<int>()
+var array<float> majLP = array.new<float>()
+var array<int> majLB = array.new<int>()
+var array<string> msgs = array.new<string>()
+var array<int> stats = array.new<int>(4, 0)   // 0 entries, 1 TP1 first, 2 stop first, 3 open
+var table tbl = na
+var table dtbl = na
+
+// ============================== series computed every bar ==============================
+atr   = ta.atr(atrLen)
+ph    = ta.pivothigh(high, pivL, pivR)
+pl    = ta.pivotlow(low, pivL, pivR)
+mph   = ta.pivothigh(high, majL, majR)
+mpl   = ta.pivotlow(low, majL, majR)
+hcMin = ta.highest(close, pivR + 1)
+lcMin = ta.lowest(close, pivR + 1)
+hcMaj = ta.highest(close, majR + 1)
+lcMaj = ta.lowest(close, majR + 1)
+hh3   = ta.highest(high, 3)
+ll3   = ta.lowest(low, 3)
+// Previous-day and higher-timeframe values: [1] + lookahead_on is the standard non-repainting form
+// (always the last COMPLETED higher-timeframe bar).
+pdh     = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_on)
+pdl     = request.security(syminfo.tickerid, "D", low[1], lookahead = barmerge.lookahead_on)
+htfBull = request.security(syminfo.tickerid, htfTf, close[1] > ta.ema(close, htfEma)[1], lookahead = barmerge.lookahead_on)
+htfBear = request.security(syminfo.tickerid, htfTf, close[1] < ta.ema(close, htfEma)[1], lookahead = barmerge.lookahead_on)
+newDay  = not na(pdh) and pdh != pdh[1]
+// Previous-bar values read here (every bar) so the state machine, which runs only on confirmed bars, never needs its own history.
+open1 = open[1]
+close1 = close[1]
+hh3p  = hh3[1]
+ll3p  = ll3[1]
+
+// ============================== helpers ==============================
+fmtP(float x) =>
+    na(x) ? "N/A" : str.tostring(x, format.mintick)
+
+stName(int st) =>
+    switch st
+        0 => "WAITING FOR TRAP"
+        1 => "TRAP CONFIRMED"
+        2 => "WAITING FOR RETEST"
+        3 => "WAITING FOR CONFIRMATION"
+        4 => "ENTRY VALID"
+        5 => "INVALIDATED"
+        => "PASS"
+
+grade(int sc) =>
+    na(sc) ? "N/A" : sc >= 9 ? "A+" : sc == 8 ? "A" : sc == 7 ? "B" : sc == 6 ? "marginal" : "PASS"
+
+pushPiv(array<float> pa, array<int> ba, float p, int b) =>
+    pa.push(p)
+    ba.push(b)
+    if pa.size() > 120
+        pa.shift()
+        ba.shift()
+
+addMsg(Setup s, string t) =>
+    msgs.push(syminfo.ticker + " " + timeframe.period + " #" + str.tostring(s.id) + (s.dir == 1 ? " BULL(trapped shorts) " : " BEAR(trapped longs) ") + t)
+
+dlabel(Setup s, string t) =>
+    if dbgOn
+        label.new(bar_index, s.dir == 1 ? low : high, "#" + str.tostring(s.id) + " " + t, style = s.dir == 1 ? label.style_label_up : label.style_label_down, color = color.new(color.gray, 25), textcolor = color.white, size = size.tiny)
+    true
+
+mkBox(Setup s, bool trapped) =>
+    color c = s.dir == 1 ? bullCol : bearCol
+    if na(s.zbox)
+        s.zbox := box.new(s.firstBar, s.zTop, bar_index, s.zBot, border_color = trapped ? c : color.new(c, 40), border_style = trapped ? line.style_solid : line.style_dotted, bgcolor = trapped ? color.new(c, 85) : color.new(c, 94))
+    if trapped and not na(s.zbox)
+        box.set_border_color(s.zbox, c)
+        box.set_border_style(s.zbox, line.style_solid)
+        box.set_bgcolor(s.zbox, color.new(c, 85))
+    true
+
+delSetup(Setup s) =>
+    if not na(s.zbox)
+        box.delete(s.zbox)
+    if not na(s.slbl)
+        label.delete(s.slbl)
+    if not na(s.lns)
+        for ln in s.lns
+            line.delete(ln)
+    if not na(s.lbs)
+        for lb in s.lbs
+            label.delete(lb)
+
+isAlive(Setup s) =>
+    s.state <= 3 or (s.state == 4 and s.result == 0)
+
+// -------- cluster of earlier swings near a price (repeated level) --------
+clusterInfo(int d, float p, int pb, float tol) =>
+    array<float> pa = d == 1 ? minHP : minLP
+    array<int> ba = d == 1 ? minHB : minLB
+    float mx = p
+    float mn = p
+    int tc = 1
+    int mb = pb
+    int sz = pa.size()
+    if sz > 0
+        for i = 0 to sz - 1
+            int b = ba.get(i)
+            float q = pa.get(i)
+            if b != pb and math.abs(pb - b) <= lookbackLvl and math.abs(q - p) <= tol
+                tc := tc + 1
+                mx := math.max(mx, q)
+                mn := math.min(mn, q)
+                mb := math.min(mb, b)
+    [tc, mx, mn, mb]
+
+// -------- candidate level (WAITING FOR TRAP) --------
+tryCandidate(int d, float p, int pb, bool isMajor, bool isPD) =>
+    float tol = tolATR * atr
+    bool dirOk = (d == 1 and showBull) or (d == -1 and showBear)
+    if dirOk and not na(tol) and tol > 0
+        [tc, mx, mn, mb] = clusterInfo(d, p, pb, tol)
+        if isPD
+            mx := p
+            mn := p
+            tc := 1
+            mb := pb
+        float zt = mx + 0.5 * tol
+        float zb = mn - 0.5 * tol
+        bool srcOk = isPD ? usePD : isMajor ? (useMajorSingle or (useRepeated and tc >= 2)) : (useRepeated and tc >= 2)
+        float recentUp = isPD ? close : isMajor ? hcMaj : hcMin
+        float recentDn = isPD ? close : isMajor ? lcMaj : lcMin
+        bool already = d == 1 ? recentUp > zt : recentDn < zb
+        if srcOk and not already
+            bool found = false
+            if setups.size() > 0
+                for s in setups
+                    if s.dir == d and zt >= s.zBot - tol and zb <= s.zTop + tol
+                        found := true
+                        if s.state == 0
+                            s.cMax := math.max(s.cMax, mx)
+                            s.cMin := math.min(s.cMin, mn)
+                            s.zTop := s.cMax + 0.5 * tol
+                            s.zBot := s.cMin - 0.5 * tol
+                            s.touches := math.max(s.touches, tc)
+                            s.major := s.major or isMajor
+                            s.pdLevel := s.pdLevel or isPD
+                            s.firstBar := math.min(s.firstBar, mb)
+                            s.lastBar := math.max(s.lastBar, pb)
+                            if not isPD
+                                s.reacted := true
+                            if not na(s.zbox)
+                                box.set_top(s.zbox, s.zTop)
+                                box.set_bottom(s.zbox, s.zBot)
+            if not found
+                Setup s = Setup.new()
+                idc.set(0, idc.get(0) + 1)
+                s.id := idc.get(0)
+                s.dir := d
+                s.cMax := mx
+                s.cMin := mn
+                s.zTop := zt
+                s.zBot := zb
+                s.touches := tc
+                s.major := isMajor
+                s.pdLevel := isPD
+                s.reacted := not isPD
+                s.firstBar := mb
+                s.lastBar := pb
+                s.lns := array.new<line>()
+                s.lbs := array.new<label>()
+                setups.push(s)
+                if dbgOn
+                    mkBox(s, false)
+                dlabel(s, "LEVEL FOUND " + fmtP(p) + (isPD ? " (prior day)" : isMajor ? " (prominent swing)" : " (repeated x" + str.tostring(tc) + ")") + (s.reacted ? " | REACTION OK" : " | needs reaction"))
+    true
+
+// -------- targets (distinct, structural, or N/A) --------
+buildTargets(Setup s) =>
+    int d = s.dir
+    array<float> pa = d == 1 ? majHP : majLP
+    float nearest = na
+    float minD = minTpATR * s.atrT
+    if pa.size() > 0
+        for i = 0 to pa.size() - 1
+            float q = pa.get(i)
+            if d * (q - s.entry) >= minD and (na(nearest) or d * q < d * nearest)
+                nearest := q
+    float pdLvl = usePD ? (d == 1 ? pdh : pdl) : na
+    if not na(pdLvl) and d * (pdLvl - s.entry) >= minD and (na(nearest) or d * pdLvl < d * nearest)
+        nearest := pdLvl
+    array<float> c = array.new<float>()
+    if not na(nearest)
+        c.push(nearest)
+    if d * (s.extreme - s.entry) >= minD
+        c.push(s.extreme)
+    if c.size() > 0
+        float far = c.get(0)
+        for i = 0 to c.size() - 1
+            if d * c.get(i) > d * far
+                far := c.get(i)
+        float nxt = na
+        if pa.size() > 0
+            for i = 0 to pa.size() - 1
+                float q = pa.get(i)
+                if d * (q - far) >= dedupATR * s.atrT and (na(nxt) or d * q < d * nxt)
+                    nxt := q
+        if not na(nxt)
+            c.push(nxt)
+        c.sort(d == 1 ? order.ascending : order.descending)
+        array<float> u = array.new<float>()
+        for i = 0 to c.size() - 1
+            float q = c.get(i)
+            if u.size() == 0 or d * (q - u.last()) >= dedupATR * s.atrT
+                u.push(q)
+        s.tp1 := u.size() > 0 ? u.get(0) : na
+        s.tp2 := u.size() > 1 ? u.get(1) : na
+        s.tp3 := u.size() > 2 ? u.get(2) : na
+    true
+
+// -------- score 0-10 (quality only; never decides whether traders are trapped) --------
+calcScore(Setup s, bool htfAgree, bool htfOpp, bool strongRej) =>
+    int d = s.dir
+    float near = d == 1 ? s.zTop : s.zBot
+    float far = d == 1 ? s.zBot : s.zTop
+    int sc = 0
+    string nt = ""
+    if s.major or s.pdLevel or s.touches >= 3
+        sc += 1
+        nt += "+level "
+    if s.touches >= 2
+        sc += 1
+        nt += "+reactions "
+    if s.brkBody >= 1.0
+        sc += 1
+        nt += "+displacement "
+    if s.accAtTrap >= 2
+        sc += 1
+        nt += "+acceptance "
+    if s.structOK
+        sc += 1
+        nt += "+structure "
+    if d * (s.extreme - near) >= 1.5 * moveATR * s.atrT
+        sc += 1
+        nt += "+away "
+    if s.retests == 1 and d * (s.retestExt - far) >= 0
+        sc += 1
+        nt += "+clean1st "
+    if strongRej
+        sc += 1
+        nt += "+rejection "
+    if s.swept
+        sc += 1
+        nt += "+sweep "
+    if not na(s.rr) and s.rr >= minRR
+        sc += 1
+        nt += "+RR "
+    if htfAgree
+        sc += 1
+        nt += "+HTF "
+    if not (s.major or s.pdLevel) and s.touches < 2
+        sc -= 1
+        nt += "-weaklevel "
+    if s.brkBody < brkBodyATR
+        sc -= 1
+        nt += "-smallbreak "
+    if not na(s.moveBar) and s.moveBar - s.trapBar > chopBars
+        sc -= 1
+        nt += "-chop "
+    if s.retests == 2
+        sc -= 1
+        nt += "-retest2 "
+    if s.retests >= 3
+        sc -= 2
+        nt += "-retests3+ "
+    if not na(s.tp1) and not na(s.stop) and d * (s.tp1 - s.entry) < d * (s.entry - s.stop)
+        sc -= 1
+        nt += "-opposingStructure "
+    if not na(s.rr) and s.rr < 1.0
+        sc -= 1
+        nt += "-poorRR "
+    if htfOpp
+        sc -= 1
+        nt += "-countertrend "
+    s.scoreNote := nt
+    s.score := math.max(0, math.min(10, sc))
+    true
+
+// -------- drawings for a valid entry --------
+drawEntry(Setup s) =>
+    color c = s.dir == 1 ? bullCol : bearCol
+    int x2 = bar_index + extBars
+    s.lns.push(line.new(bar_index, s.entry, x2, s.entry, color = c, width = 2))
+    s.lns.push(line.new(bar_index, s.stop, x2, s.stop, color = color.new(bearCol, 0), style = line.style_dotted))
+    s.lbs.push(label.new(x2, s.entry, "ENTRY " + fmtP(s.entry), style = label.style_label_left, color = color.new(c, 20), textcolor = color.white, size = size.tiny))
+    s.lbs.push(label.new(x2, s.stop, "STOP " + fmtP(s.stop), style = label.style_label_left, color = color.new(bearCol, 20), textcolor = color.white, size = size.tiny))
+    if not na(s.tp1)
+        s.lns.push(line.new(bar_index, s.tp1, x2, s.tp1, color = c, style = line.style_dashed))
+        s.lbs.push(label.new(x2, s.tp1, "TP1 " + fmtP(s.tp1), style = label.style_label_left, color = color.new(c, 40), textcolor = color.white, size = size.tiny))
+    if not na(s.tp2)
+        s.lns.push(line.new(bar_index, s.tp2, x2, s.tp2, color = c, style = line.style_dashed))
+        s.lbs.push(label.new(x2, s.tp2, "TP2 " + fmtP(s.tp2), style = label.style_label_left, color = color.new(c, 40), textcolor = color.white, size = size.tiny))
+    if not na(s.tp3)
+        s.lns.push(line.new(bar_index, s.tp3, x2, s.tp3, color = c, style = line.style_dashed))
+        s.lbs.push(label.new(x2, s.tp3, "TP3 " + fmtP(s.tp3), style = label.style_label_left, color = color.new(c, 40), textcolor = color.white, size = size.tiny))
+    s.lbs.push(label.new(bar_index, s.dir == 1 ? low : high, (s.dir == 1 ? "LONG " : "SHORT ") + grade(s.score) + " (" + str.tostring(s.score) + "/10)", style = s.dir == 1 ? label.style_label_up : label.style_label_down, color = c, textcolor = color.black, size = size.small))
+    true
+
+// -------- the state machine, one setup, one confirmed bar --------
+step(Setup s) =>
+    int d = s.dir
+    int n = bar_index
+    float near = d == 1 ? s.zTop : s.zBot
+    float far = d == 1 ? s.zBot : s.zTop
+    float body = math.abs(close - open)
+    // ---- 0: level waiting for the trap ----
+    if s.state == 0
+        if n - s.lastBar > maxCandAge
+            s.state := 6
+            s.reason := "level expired without a trap"
+            dlabel(s, "PASS: level expired")
+        else
+            if not s.reacted
+                bool touched = d == 1 ? high >= s.zBot : low <= s.zTop
+                bool rejected = d == 1 ? close <= s.zBot - pdReactATR * atr : close >= s.zTop + pdReactATR * atr
+                if touched and rejected
+                    s.reacted := true
+                    dlabel(s, "REACTION CONFIRMED (prior-day level rejected)")
+            float beyond = d * (close - near)
+            bool closeBeyond = beyond > beyondATR * atr
+            if beyond > beyondATR * atr
+                s.accCnt += 1
+            else
+                s.accCnt := 0
+            bool bodyDir = d * (close - open) > 0
+            bool trapNow = s.reacted and closeBeyond and ((bodyDir and body >= brkBodyATR * atr) or s.accCnt >= acceptBars)
+            if trapNow
+                s.state := 1
+                s.trapBar := n
+                s.atrT := atr
+                s.brkBody := body / atr
+                s.brkBeyond := beyond / atr
+                s.accAtTrap := s.accCnt
+                s.extreme := d == 1 ? high : low
+                int ns = d == 1 ? majLP.size() : majHP.size()
+                if ns >= 2
+                    s.structOK := d == 1 ? majLP.get(ns - 1) > majLP.get(ns - 2) : majHP.get(ns - 1) < majHP.get(ns - 2)
+                s.trapWhy := (d == 1 ? "Shorts sold the " : "Longs bought the ") + (d == 1 ? "resistance" : "support") + " at " + fmtP(s.cMax) + (s.touches > 1 ? " (" + str.tostring(s.touches) + " reactions)" : (s.major ? " (prominent swing)" : " (prior-day level)")) + "; close " + str.tostring(s.brkBeyond, "0.00") + " ATR beyond the zone, body " + str.tostring(s.brkBody, "0.00") + " ATR (" + str.tostring(s.accAtTrap) + " accepting closes) proved them wrong."
+                mkBox(s, true)
+                addMsg(s, "TRAP CONFIRMED zone " + fmtP(s.zBot) + "-" + fmtP(s.zTop))
+                dlabel(s, "TRAP CONFIRMED")
+            else
+                s.why := not s.reacted ? "no reaction evidence at the level yet" : closeBeyond ? "break body " + str.tostring(body / atr, "0.00") + " ATR < " + str.tostring(brkBodyATR, "0.00") + " and acceptance " + str.tostring(s.accCnt) + "/" + str.tostring(acceptBars) : beyond > 0 ? "close only " + str.tostring(beyond / atr, "0.00") + " ATR beyond zone (< " + str.tostring(beyondATR, "0.00") + ")" : "price has not closed beyond the zone"
+    // ---- trap confirmed or later: upkeep, invalidation ----
+    if s.state >= 1 and s.state <= 3
+        s.extreme := d == 1 ? math.max(s.extreme, high) : math.min(s.extreme, low)
+        bool wrongClose = d * (far - close) >= invBeyondATR * s.atrT
+        s.wrongCnt := wrongClose ? s.wrongCnt + 1 : 0
+        bool disp = wrongClose and d * (open - close) >= invDispATR * s.atrT
+        if s.wrongCnt >= invAccept or disp
+            s.state := 5
+            s.inRetest := false
+            s.reason := disp ? "displacement candle closed beyond the zone against the setup" : str.tostring(s.wrongCnt) + " consecutive closes beyond the zone, no reclaim"
+            addMsg(s, "INVALIDATED: " + s.reason)
+            dlabel(s, "INVALIDATED")
+        else if n - s.trapBar > maxSetupAge
+            s.state := 6
+            s.reason := "trap expired"
+    // ---- 1: trapped, waiting to move away ----
+    if s.state == 1
+        if d * (s.extreme - near) >= moveATR * s.atrT
+            s.moved := true
+            s.moveBar := n
+            s.state := 2
+            addMsg(s, "MOVED AWAY, WAITING FOR RETEST of " + fmtP(s.zBot) + "-" + fmtP(s.zTop))
+            dlabel(s, "MOVED AWAY")
+        else
+            s.why := "moved " + str.tostring(d * (s.extreme - near) / s.atrT, "0.00") + " / " + str.tostring(moveATR, "0.00") + " ATR from the zone"
+    // ---- 2: moved away, waiting for the return ----
+    if s.state == 2
+        bool touchNow = d == 1 ? low <= near : high >= near
+        if touchNow
+            s.retests += 1
+            if s.retests > maxRetests
+                s.state := 6
+                s.reason := "zone consumed (" + str.tostring(s.retests) + " retests)"
+                dlabel(s, "PASS: zone consumed")
+            else
+                s.state := 3
+                s.inRetest := true
+                s.retestStart := n
+                s.retestExt := d == 1 ? low : high
+                s.swept := false
+                s.confFailed := false
+                addMsg(s, (s.retests == 1 ? "FIRST RETEST" : "RETEST #" + str.tostring(s.retests)) + " of the trap zone")
+                dlabel(s, s.retests == 1 ? "FIRST RETEST" : "RETEST #" + str.tostring(s.retests))
+        else
+            s.why := "price has not returned to the zone"
+    // ---- 3: in the retest window, looking for confirmation ----
+    if s.state == 3
+        s.retestExt := d == 1 ? math.min(s.retestExt, low) : math.max(s.retestExt, high)
+        s.swept := s.swept or (d == 1 ? low < s.zBot : high > s.zTop)
+        float rng = high - low
+        float wick = d == 1 ? math.min(open, close) - low : high - math.max(open, close)
+        bool closeNear = d * (close - near) > 0
+        bool pWick = cWick and rng > 0 and wick / rng >= wickRatio and closeNear
+        bool pEngulf = cEngulf and d * (close - open) > 0 and d * (close - open1) > 0 and d * (close1 - open1) < 0 and closeNear
+        bool pStrong = cStrong and d * (close - open) >= strongBodyATR * s.atrT and closeNear
+        bool pSweep = cSweep and (d == 1 ? low < s.zBot : high > s.zTop) and closeNear
+        bool bos = d == 1 ? close > hh3p : close < ll3p
+        s.chochSeen := s.chochSeen or bos
+        bool confFound = pWick or pEngulf or pStrong or pSweep
+        if confFound
+            s.confPassed := true
+            s.confName := (pWick ? "rejection wick " : "") + (pEngulf ? "engulfing " : "") + (pStrong ? "strong close " : "") + (pSweep ? "sweep+reclaim " : "")
+            s.entry := close
+            float buf = stopBufATR * s.atrT
+            float rawStop = (d == 1 ? math.min(s.retestExt, far) : math.max(s.retestExt, far)) - d * buf
+            float risk = d * (s.entry - rawStop)
+            s.stop := (risk >= minRiskATR * s.atrT and risk <= maxRiskATR * s.atrT) ? rawStop : na
+            buildTargets(s)
+            s.rr := (not na(s.stop) and not na(s.tp1)) ? d * (s.tp1 - s.entry) / risk : na
+            bool htfAgree = d == 1 ? htfBull : htfBear
+            bool htfOpp = d == 1 ? htfBear : htfBull
+            bool strongRej = (rng > 0 and wick / rng >= 0.5) or d * (close - open) >= 0.7 * s.atrT
+            calcScore(s, htfAgree, htfOpp, strongRej)
+            string fail = ""
+            if na(s.stop)
+                fail := "no legitimate structural stop (risk outside " + str.tostring(minRiskATR, "0.00") + "-" + str.tostring(maxRiskATR, "0.0") + " ATR)"
+            else if useFilters
+                if useScore and s.score < minScore
+                    fail := "score " + str.tostring(s.score) + " < " + str.tostring(minScore)
+                else if useFirst and s.retests > 1
+                    fail := "retest #" + str.tostring(s.retests) + " (first clean retest only)"
+                else if useRR and (na(s.rr) or s.rr < minRR)
+                    fail := "R:R " + (na(s.rr) ? "N/A (no distinct target)" : str.tostring(s.rr, "0.0")) + " < " + str.tostring(minRR, "0.0")
+                else if useHTF and not htfAgree
+                    fail := "higher timeframe does not agree"
+                else if useChoch and not s.chochSeen
+                    fail := "no minor structure break yet"
+            if fail == ""
+                s.state := 4
+                s.inRetest := false
+                s.entryBar := n
+                stats.set(0, stats.get(0) + 1)
+                stats.set(3, stats.get(3) + 1)
+                drawEntry(s)
+                addMsg(s, "ENTRY VALID " + (d == 1 ? "LONG" : "SHORT") + " entry " + fmtP(s.entry) + " stop " + fmtP(s.stop) + " TP1 " + fmtP(s.tp1) + " score " + str.tostring(s.score))
+                dlabel(s, "CONFIRMATION PASSED: " + s.confName)
+            else
+                s.state := 6
+                s.inRetest := false
+                s.reason := "confirmation seen (" + s.confName + ") but filtered: " + fail
+                dlabel(s, "CONFIRMATION PASSED, FILTERED: " + fail)
+        else
+            bool expired = n - s.retestStart >= retestWindow
+            bool left = d * (close - near) >= leaveATR * s.atrT
+            if expired or left
+                s.confFailed := true
+                s.inRetest := false
+                s.state := 2
+                s.reason := expired ? "no confirmation within " + str.tostring(retestWindow) + " bars" : "price left the zone without confirmation"
+                dlabel(s, "CONFIRMATION FAILED: " + s.reason)
+            else
+                s.why := "in retest, no confirmation pattern yet"
+    // ---- 4: entry open, track the first thing hit (stop assumed first if both in one bar) ----
+    if s.state == 4 and s.result == 0 and n > s.entryBar
+        bool stopHit = d == 1 ? low <= s.stop : high >= s.stop
+        bool tpHit = not na(s.tp1) and (d == 1 ? high >= s.tp1 : low <= s.tp1)
+        if stopHit
+            s.result := 1
+            stats.set(2, stats.get(2) + 1)
+            stats.set(3, stats.get(3) - 1)
+        else if tpHit
+            s.result := 2
+            stats.set(1, stats.get(1) + 1)
+            stats.set(3, stats.get(3) - 1)
+    // ---- drawings upkeep ----
+    if not na(s.zbox)
+        if isAlive(s)
+            box.set_right(s.zbox, n)
+        else if not s.drawnFinal
+            box.set_right(s.zbox, n)
+            box.set_border_color(s.zbox, color.new(color.gray, 20))
+            box.set_bgcolor(s.zbox, color.new(color.gray, 92))
+            s.drawnFinal := true
+    if s.state >= 1 and (isAlive(s) or not s.drawnFinal)
+        string t = "#" + str.tostring(s.id) + " " + stName(s.state) + (s.state == 4 ? (s.result == 1 ? " (stopped)" : s.result == 2 ? " (TP1 hit)" : "") : "")
+        if na(s.slbl)
+            s.slbl := label.new(n, d == 1 ? s.zTop : s.zBot, t, style = d == 1 ? label.style_label_down : label.style_label_up, color = color.new(d == 1 ? bullCol : bearCol, 30), textcolor = color.white, size = size.tiny)
+        else
+            label.set_xy(s.slbl, n, d == 1 ? s.zTop : s.zBot)
+            label.set_text(s.slbl, t)
+    true
+
+// -------- debug path text --------
+pathTxt(Setup s) =>
+    string t = "LEVEL FOUND OK > "
+    t += s.reacted ? "REACTION OK > " : "REACTION NO (" + s.why + ")"
+    if s.reacted
+        t += s.trapBar > 0 ? "TRAP OK > " : "TRAP NO (" + s.why + ")"
+    if s.trapBar > 0
+        t += s.moved ? "MOVED AWAY OK > " : "MOVED AWAY NO (" + s.why + ")"
+    if s.moved
+        t += s.retests > 0 ? "RETEST #" + str.tostring(s.retests) + " OK > " : "RETEST NO (" + s.why + ")"
+    if s.retests > 0
+        t += s.confPassed ? "CONFIRMATION PASSED (" + s.confName + ")" : s.confFailed ? "CONFIRMATION FAILED (" + s.reason + ")" : "CONFIRMATION pending"
+    if s.state == 6 or s.state == 5
+        t += " | " + stName(s.state) + ": " + s.reason
+    t
+
+// ============================== main (confirmed bars only) ==============================
+if barstate.isconfirmed
+    msgs.clear()
+    if not na(ph)
+        pushPiv(minHP, minHB, ph, bar_index - pivR)
+        tryCandidate(1, ph, bar_index - pivR, false, false)
+    if not na(pl)
+        pushPiv(minLP, minLB, pl, bar_index - pivR)
+        tryCandidate(-1, pl, bar_index - pivR, false, false)
+    if not na(mph)
+        pushPiv(majHP, majHB, mph, bar_index - majR)
+        tryCandidate(1, mph, bar_index - majR, true, false)
+    if not na(mpl)
+        pushPiv(majLP, majLB, mpl, bar_index - majR)
+        tryCandidate(-1, mpl, bar_index - majR, true, false)
+    if newDay and usePD
+        tryCandidate(1, pdh, bar_index, false, true)
+        tryCandidate(-1, pdl, bar_index, false, true)
+    if setups.size() > 0
+        for s in setups
+            step(s)
+    // keep the chart readable: drop the oldest finished setups first
+    while setups.size() > maxKeep
+        int idx = 0
+        for i = 0 to setups.size() - 1
+            if not isAlive(setups.get(i)) and setups.get(i).state != 0
+                idx := i
+                break
+        Setup old = setups.remove(idx)
+        delSetup(old)
+    if msgs.size() > 0
+        alert(msgs.join("\n"), alert.freq_once_per_bar_close)
+
+// ============================== tables (display only) ==============================
+tpos = switch tblPos
+    "Top left" => position.top_left
+    "Bottom right" => position.bottom_right
+    "Bottom left" => position.bottom_left
+    "Middle right" => position.middle_right
+    => position.top_right
+
+if barstate.islast
+    if tblOn
+        if na(tbl)
+            tbl := table.new(tpos, 2, 19, border_width = 1, frame_color = color.new(color.gray, 60), frame_width = 1)
+        Setup cur = na
+        if setups.size() > 0
+            for s in setups
+                if s.state >= 1 and s.state <= 4
+                    cur := s
+            if na(cur)
+                for s in setups
+                    if s.state >= 4 or (s.state >= 5 and s.trapBar > 0)
+                        cur := s
+        color bg = color.new(#0F1520, 5)
+        table.cell(tbl, 0, 0, "TRAPPED TRADERS", text_color = color.white, bgcolor = color.new(#141C2A, 0), text_size = size.small)
+        table.cell(tbl, 1, 0, "UNVALIDATED", text_color = color.orange, bgcolor = color.new(#141C2A, 0), text_size = size.small)
+        array<string> lab = array.from("Direction", "Original level", "Trap type", "Trap zone", "Why trapped", "Breakout", "Return / retest", "Entry trigger", "Entry zone", "Stop loss", "TP1", "TP2", "TP3", "Risk : reward", "Quality", "Status", "Record (entries)")
+        array<string> val = array.new<string>(17, "")
+        if na(cur)
+            val.set(0, "PASS")
+            val.set(15, "PASS - NO CLEAR TRAPPED-TRADER SETUP")
+            val.set(4, "Nothing meets who/where/why/direction yet")
+        else
+            int d = cur.dir
+            val.set(0, cur.state == 4 ? (d == 1 ? "LONG" : "SHORT") : cur.state >= 5 ? "PASS" : (d == 1 ? "LONG (pending)" : "SHORT (pending)"))
+            val.set(1, fmtP(d == 1 ? cur.cMax : cur.cMin))
+            val.set(2, d == 1 ? "TRAPPED SHORTS" : "TRAPPED LONGS")
+            val.set(3, fmtP(cur.zBot) + " - " + fmtP(cur.zTop))
+            val.set(4, cur.trapWhy == "" ? "not trapped yet" : cur.trapWhy)
+            val.set(5, na(cur.trapBar) ? "waiting" : "closed beyond zone; body " + str.tostring(cur.brkBody, "0.00") + " ATR")
+            val.set(6, cur.retests == 0 ? (cur.moved ? "waiting for return" : "waiting to move away") : "retest #" + str.tostring(cur.retests) + (cur.inRetest ? " (active)" : ""))
+            val.set(7, cur.confName == "" ? "none yet" : cur.confName)
+            val.set(8, cur.state == 4 ? fmtP(cur.entry) : "N/A")
+            val.set(9, cur.state == 4 ? fmtP(cur.stop) : "N/A")
+            val.set(10, cur.state == 4 ? fmtP(cur.tp1) : "N/A")
+            val.set(11, cur.state == 4 ? fmtP(cur.tp2) : "N/A")
+            val.set(12, cur.state == 4 ? fmtP(cur.tp3) : "N/A")
+            val.set(13, cur.state == 4 and not na(cur.rr) ? str.tostring(cur.rr, "0.0") : "N/A")
+            val.set(14, na(cur.score) ? "N/A" : str.tostring(cur.score) + "/10 " + grade(cur.score))
+            val.set(15, stName(cur.state) + (cur.reason != "" and cur.state >= 5 ? ": " + cur.reason : ""))
+        val.set(16, str.tostring(stats.get(0)) + " | TP1 first " + str.tostring(stats.get(1)) + " | stop first " + str.tostring(stats.get(2)) + " | open " + str.tostring(stats.get(3)))
+        for i = 0 to 16
+            table.cell(tbl, 0, i + 1, lab.get(i), text_color = color.new(color.white, 25), bgcolor = bg, text_size = size.tiny, text_halign = text.align_left)
+            table.cell(tbl, 1, i + 1, val.get(i), text_color = color.white, bgcolor = bg, text_size = size.tiny, text_halign = text.align_left)
+    if dbgOn
+        if na(dtbl)
+            dtbl := table.new(position.bottom_left, 1, 9, border_width = 1, frame_color = color.new(color.gray, 60), frame_width = 1)
+        table.cell(dtbl, 0, 0, "DEBUG: why each candidate did or did not advance", text_color = color.yellow, bgcolor = color.new(#141C2A, 0), text_size = size.tiny, text_halign = text.align_left)
+        int row = 1
+        if setups.size() > 0
+            for i = setups.size() - 1 to 0
+                if row <= 8
+                    Setup s = setups.get(i)
+                    table.cell(dtbl, 0, row, "#" + str.tostring(s.id) + (s.dir == 1 ? " BULL " : " BEAR ") + fmtP(s.dir == 1 ? s.cMax : s.cMin) + " | " + pathTxt(s), text_color = color.white, bgcolor = color.new(#0F1520, 5), text_size = size.tiny, text_halign = text.align_left)
+                    row += 1
+        while row <= 8
+            table.cell(dtbl, 0, row, "", bgcolor = color.new(#0F1520, 100), text_size = size.tiny)
+            row += 1

@@ -82,6 +82,18 @@ Adam asked to rerun both at $400 deposit (his real account size) instead of the 
 
 **Real conclusion: XAUUSD is not account-viable on this EA at $400, and can't be made viable by lot-mode alone.** A real fix would need a fundamentally tighter stop on gold (different scope, not attempted). Keeping OB Hunter **EURUSD-only** for this account for now.
 
+## Multi-year test + random-zone control (2026-10-10) — NO EDGE, OB indistinguishable from random boxes
+Script `obh_random_control_research.py` (this folder): a line-for-line Python replica of this EA's defaults (M15 structure, M5 tap & close, 2R, SL beyond zone + 0.05 ATR, one trade at a time), on AAAFx M1 2020-01-02 → 2026-10-09 exported with `TWIBarsExportTester`, bar spreads (+6 pts gold markup), SL-first on ties (only 2 of 1,536 EURUSD trades). Replica check: EURUSD Sep 2025–Aug 2026 = 225 trades vs the EA's 230. Control: 50 runs where every OB is swapped for a same-size, same-direction, same-time "twin" placed at a random distance drawn from the real zones' own distances.
+
+| Market | Real trades | Real R | PF(R) | Twins median R | Real beats twins | Positive years |
+|---|---|---|---|---|---|---|
+| EURUSD | 1,536 | −138.8 | 0.87 | −121.0 | 34% | 2 of 7 (2023, 2025) |
+| GBPUSD | 1,493 | −162.9 | 0.85 | −197.7 | 72% | 1 of 7 |
+| USDJPY | 1,287 | −105.6 | 0.88 | −136.0 | 72% | 3 of 7 (all ≤ +11R) |
+| XAUUSD | 1,288 | −42.2 | 0.95 | −58.6 | 68% | 3 of 7 |
+
+**Read:** it loses on every market over ~7 years, with win rates of 30–33% against the 33.3% breakeven at 2R. The real OBs land in the middle of the random-twin spread (34–72%; a real edge would beat ≥ 95%). Twins lose almost exactly as much, so the loss comes from the tap-and-close + tight stop + 2R mechanic, and the OB location adds at most ~0.02–0.03R per trade, well inside the noise. 2021 was a wipeout for real and twins alike (19–22% wins). **The 2026-09-02 PF 1.18 / 1.21 was a lucky window: EURUSD's 2025 was +30.4R, and every other year but 2023 lost.** Don't deploy this EA. The live RisenAdam attach from 2026-09-02 (unconfirmed) should come off if it's still there.
+
 ## Next steps
 - Pull the full exported report (drawdown %, win rate, trade count, max consecutive losses) rather than reading it off a phone photo — export via the terminal's Results tab, or get a headless run working once RisenAdam's tester slot is free.
 - Sweep `SweepMinATRmult`, `MaxBarsForBOS`, and `RR_Multiplier` now that real trade data exists — these are the parameters most likely to need tuning.

@@ -16,5 +16,8 @@ Adam's family coffee brand, which he owns and builds with his wife April. Rename
 - [[Rules]] — always-on rules: no acid/health claims, no invented facts, nothing public or spent without Adam.
 - [[Tools To-Do]] — seven tools to RESEARCH only; nothing installed without Adam's OK.
 
+- `Theme Backup - O For the Love of Coffee Working Draft (2026-10-05)/` — full copy (482 files) of the old draft theme, taken before deletion.
+- `Old Brand Files Backup (2026-10-05)/` — the three old OFLC images (logo, gameday, trips) saved before they were deleted from Shopify Files.
+
 ## Related
 [[O For the Love of Coffee]] (history) · [[Nocturnal Chaos Coffee - Social Drafts]] (older 9/24 drafts, now partly out of date) · `03 - Personal/Nocturnal Chaos Coffee - owl logo.png`

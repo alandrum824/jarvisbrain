@@ -1,0 +1,98 @@
+POLYEDGE v5 — REDESIGN + SPEED (Grok Build). Do NOT touch the decision engine.
+
+SCOPE LOCK
+Do not change: the model, PASS/WAITING/LEAN/PLAY rules, power-method vig removal, the 15–85¢ band, confidence math,
+max-buy math, snapshots/record logic, or any number the cards show. This patch is ONLY (A) how it looks and
+(B) how fast and light it loads. Every field currently on a card and detail page must still be reachable.
+If a number would change, stop and tell me.
+
+BASELINE I MEASURED (iPhone 390px, 2026-10-05, headless, fresh load)
+  First card on screen ........ 10.0 s   (DOM ready 10.6 s)
+  Initial JS .................. 133 KB + 25 KB (gzip-transferred)
+  Steady state ................ 3 refreshes per minute, 546 KB per minute (~180 KB each)
+  Long tasks (>50 ms) ......... 4 in 60 s (243 ms total, worst 71 ms)
+  Sticky filters + search ..... about 40% of the first screen before any game shows
+You must beat all of these. Report the same numbers when done.
+
+------------------------------------------------------------
+A. LOOK (mobile first, one column, 390px, dark, premium, calm)
+------------------------------------------------------------
+A1. Design tokens (use exactly these, define once):
+  --bg #0A0E14  --surface #0F1520  --surface-2 #141C2A  --line rgba(255,255,255,.07)
+  --text #E8EEF5  --text-2 #A3B0BF (min contrast 4.5:1 on --bg; never dimmer)  --text-3 #7B8896 (labels only)
+  --play #2DE2A6  --lean #F5C451  --wait #5AA9FF  --pass #6B7785  --bad #FF5C6C
+  Radius 14px cards, 10px chips. 1px borders, no heavy glows (a faint glow only on PLAY).
+  Fonts: Inter (text), JetBrains Mono (numbers). ALL numbers use tabular-nums.
+  Uppercase labels: 11px, letter-spacing 0.06em (not the wide spacing used now).
+  Team names in normal case ("Phoenix Suns"), never ALL CAPS.
+
+A2. Header + filters: max 104px total, sticky, nothing else above the content.
+  Row 1 (52px): logo mark + "PolyEdge" wordmark; right side: a green/amber/red LIVE dot (feeds healthy / stale /
+    down) with "updated 12s ago", then a search ICON that expands into a field on tap (no always-open search box).
+  Row 2 (48px): sport chips in ONE horizontally scrollable row, no wrapping, small icons: All MLB NFL NBA NHL CFB.
+    Day control directly under as a slim 3-way segmented control: Today | Tomorrow | Week (36px).
+  Remember the last sport and day (localStorage).
+
+A3. Summary strip right under the filters (not sticky): four tap-to-filter tiles — PLAY n · LEAN n · WAITING n · PASS n.
+  Tiles use the tier colors. Count-up animation 300 ms.
+
+A4. Top call area:
+  - If there is a PLAY/LEAN: one hero card with larger logos, the pick, % to win, edge, max buy vs now.
+  - If none: a calm empty state (no big box): "No plays right now. Most games sit within a point of fair, so PASS is
+    the normal answer." plus one line "Closest: <team> +0.9 pts" if any game has a positive edge.
+
+A5. Game rows — two forms so a page of 90 games is scannable:
+  COMPACT ROW (WAITING, PASS, no data): 56px high. Team logos (24px), "Suns @ Pistons", time in PT with countdown
+    ("in 2h 14m"), a small status chip on the right, and ONE short reason ("Waiting for books"). NO dashes, no
+    empty columns, no "—¢" strings anywhere. If a value does not exist, do not render its label.
+  FULL CARD (PLAY, LEAN, or any game with a real price): left color bar by tier; top line sport tag, time/countdown,
+    status chip; matchup with logos; the pick team in large type with "% to win" and the likely range; confidence as a
+    thin bar with the number; a PRICE LADDER — one horizontal 0–100% track with three markers: Model, Books, Polymarket
+    (labelled, color coded) and the edge in points as a pill (green when positive, grey when not); under it Max buy vs
+    Now with the VALUE / MARGINAL / VALUE GONE chip; the action line at the bottom. Tap = expand in place.
+  Expanded detail keeps everything that exists today (factor waterfall, what-changes-this, data inputs with
+  VERIFIED/PROJECTED/STALE/MISSING chips, injuries, audit/timestamps) but in collapsible sections, default closed.
+
+A4b. Bottom nav: 4 tabs only: Board, Live, Track, Sources (48px targets, safe-area padding, active tab filled).
+  FIX THE BUG: the floating "Ask PolyEdge" pill currently sits on top of the Watchlist/Track tabs. Move Ask to a header
+  icon (or a small FAB 72px above the nav). Nothing may overlap the nav.
+
+A6. States: skeleton cards (shimmering) while loading, never a blank screen; an inline "Offline — showing data from 2 min
+  ago" banner on failure; errors never replace the whole page.
+A7. Motion: 150–200 ms fades/slides for expand and tab changes, no looping animations except the live dot.
+  Respect prefers-reduced-motion. Focus rings visible. Hit targets >= 44px.
+A8. Detail page ("Open game"): sticky mini header with both logos + status chip; same sections as the expanded card.
+
+------------------------------------------------------------
+B. SPEED + EFFICIENCY (targets are hard requirements)
+------------------------------------------------------------
+B1. Instant paint: save the last slate JSON locally (localStorage/IndexedDB) and render it immediately on open
+    (stale-while-revalidate), with "updated Xs ago". First card on screen <= 1.5 s warm, <= 4 s cold on throttled 4G.
+    If there is no cache, show skeleton cards at once and fill in as data arrives.
+B2. Find what blocks the 10 seconds. Render the shell first; do not block the page on server-side data. Fetch ESPN,
+    sportsbook lines and Polymarket IN PARALLEL, and cache each upstream on the server (ESPN 30–60 s, books 10 min,
+    Polymarket 20–60 s) so ten users cost the same as one.
+B3. Slim the payload: the list endpoint returns only what the list shows (target <= 30 KB gzipped for ~100 games);
+    full detail is fetched when a card is expanded. Enable gzip/brotli and ETag/If-None-Match so an unchanged slate
+    returns 304 with no body.
+B4. Adaptive polling: live games every 15 s, pregame every 60 s, no games every 5 min; PAUSE when the tab is hidden and
+    refresh once when it becomes visible. Steady state <= 60 KB per minute (today 546 KB).
+B5. Render cost: memoize cards by game id + a version/hash so unchanged cards do not re-render; no long task over 50 ms
+    in a 60 s idle window; show at most ~40 rows at once (the Passes list collapsed by default, "Show all" loads more);
+    DOM nodes < 800 with 100 games.
+B6. Weight: initial JS <= 150 KB gzipped; lazy-load Track, Sources, the detail page and the Ask assistant (Ask loads only
+    when opened). Logos: lazy, fixed width/height (no layout shift), request small variants (~64px).
+B7. Never poll faster than the numbers above and never fetch the same upstream twice in one refresh.
+
+------------------------------------------------------------
+ACCEPTANCE TESTS (show numbers)
+------------------------------------------------------------
+1. First card: <= 1.5 s warm cache, <= 4 s cold. (Baseline 10.0 s.)
+2. 60 s idle at 390px: <= 60 KB transferred, 0 long tasks over 50 ms. (Baseline 546 KB, 4 long tasks.)
+3. The first screen (390x844) shows the header, filters, summary tiles AND at least two game rows without scrolling.
+4. A WAITING/PASS game shows no "—", "—¢" or empty label anywhere on its compact row.
+5. A game with a real price shows the price ladder with all three markers and the edge pill.
+6. Nothing overlaps the bottom nav; Ask is reachable from the header.
+7. Contrast of body and secondary text >= 4.5:1; reduced-motion respected.
+8. Every number on a card equals what it showed before this patch (spot-check 5 games).
+Report what you changed file by file and the before/after numbers for tests 1 and 2.

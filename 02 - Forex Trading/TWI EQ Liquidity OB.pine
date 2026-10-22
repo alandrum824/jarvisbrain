@@ -1,0 +1,626 @@
+//@version=6
+// TWI EQ Liquidity OB  v1.0 - UNVALIDATED. Identifies the sequence only; places no trades.
+// From Adam's video frames (XAUUSD 1m), 2026-10-07:
+//   SELL: equal highs (two tops within a tolerance) -> a close breaks the swing low between the tops (BOS)
+//         -> price retraces into the order block ("water block" = last up candle at the second top) -> rejection -> sell.
+//   BUY:  the mirror: equal lows -> break of the swing high between them -> retrace into the demand order block -> buy.
+//   A fair value gap in the break leg ("OB + FB/FVG") is optional confluence, not required by default.
+// Non-repainting: all logic runs on confirmed bars only, pivots are used only after confirmation,
+// the order-block zone is frozen at the BOS bar, alerts fire once per transition at bar close.
+// Note: the "Double top/bottom" origin in TWI Manas Setup is a close cousin and tested 9 trades / 0% / -9R on gold 30m.
+indicator("TWI EQ Liquidity OB (UNVALIDATED)", shorttitle = "TWI EQ OB", overlay = true, max_boxes_count = 200, max_lines_count = 400, max_labels_count = 400, max_bars_back = 2000)
+
+// ============================== inputs ==============================
+grpG = "General"
+atrLen   = input.int(14, "ATR length", minval = 1, group = grpG)
+showBuy  = input.bool(true, "Buys (equal lows)", group = grpG)
+showSell = input.bool(true, "Sells (equal highs)", group = grpG)
+dbgOn    = input.bool(false, "Debug mode (label every step and why setups stop)", group = grpG)
+maxKeep  = input.int(12, "Setups kept on chart", minval = 3, maxval = 40, group = grpG)
+
+grpE = "1. Equal highs / lows"
+pivL      = input.int(3, "Swing left bars", minval = 1, group = grpE)
+pivR      = input.int(3, "Swing right bars (confirmation delay)", minval = 1, group = grpE)
+eqTolATR  = input.float(0.15, "Equal tolerance (x ATR)", minval = 0.01, step = 0.05, group = grpE)
+minGap    = input.int(3, "Min bars between the two touches", minval = 1, group = grpE)
+maxGap    = input.int(60, "Max bars between the two touches", minval = 5, group = grpE)
+minDipATR = input.float(0.5, "Middle swing must be at least (x ATR) away", minval = 0.1, step = 0.1, group = grpE)
+trigIn    = input.string("Equal levels + sweeps", "Setup trigger", options = ["Equal levels + sweeps", "Equal levels only", "Sweeps only"], group = grpE)
+sweepMaxATR = input.float(2.0, "Sweep: new swing runs a prior swing by at most (x ATR), then closes back", minval = 0.2, step = 0.1, group = grpE)
+useEqT    = trigIn != "Sweeps only"
+useSwT    = trigIn != "Equal levels only"
+
+grpB = "2. Break of the middle swing (BOS)"
+beyondATR  = input.float(0.05, "Close beyond the middle swing by (x ATR)", minval = 0.0, step = 0.05, group = grpB)
+bosMaxBars = input.int(40, "BOS must come within (bars after the 2nd touch)", minval = 3, group = grpB)
+
+grpZ = "3. Order block ('water block')"
+obLook   = input.int(5, "Search back from the 2nd touch for the last opposite candle (bars)", minval = 0, group = grpZ)
+obMaxATR = input.float(1.5, "If the OB candle is taller than (x ATR), use its body", minval = 0.2, step = 0.1, group = grpZ)
+needFVG  = input.bool(false, "Require a fair value gap in the break leg", group = grpZ)
+
+grpN = "4. Entry"
+entryMode  = input.string("Rejection close", "Entry", options = ["Rejection close", "Touch of the zone"], group = grpN)
+zoneIn     = input.string("Advance block (stop above the top block)", "Entry zone", options = ["Advance block (stop above the top block)", "Top block (stop above it)"], group = grpN)
+useAdv     = zoneIn == "Advance block (stop above the top block)"
+retestMax  = input.int(120, "Retest must come within (bars after BOS)", minval = 3, group = grpN)
+
+grpI = "5. Invalidation"
+invAccept = input.int(2, "Invalid after N consecutive closes beyond the far edge", minval = 1, group = grpI)
+invBufATR = input.float(0.10, "...each beyond the zone by (x ATR)", minval = 0.0, step = 0.05, group = grpI)
+killOnEQ  = input.bool(true, "Invalid if price closes beyond the equal level", group = grpI)
+
+grpS = "6. Stop and targets (N/A if not structural)"
+stopMode   = input.string("Beyond the zone", "Stop placement", options = ["Beyond the zone", "Beyond the equal level"], group = grpS)
+stopBufATR = input.float(0.10, "Stop buffer (x ATR)", minval = 0.0, step = 0.05, group = grpS)
+minRiskATR = input.float(0.15, "Min risk (x ATR)", minval = 0.0, step = 0.05, group = grpS)
+maxRiskATR = input.float(4.0, "Max risk (x ATR), else stop = N/A", minval = 0.5, step = 0.5, group = grpS)
+minTpATR   = input.float(0.5, "Target must be beyond entry by (x ATR)", minval = 0.1, step = 0.1, group = grpS)
+useOrigin  = input.bool(true, "TP2 = the previous low/high the move into the equal level started from", group = grpS)
+originLook = input.int(150, "...look back up to (bars before the 1st touch)", minval = 10, maxval = 1000, group = grpS)
+originMinATR = input.float(3.0, "...must be at least (x ATR) from the equal level, else keep looking back", minval = 0.0, step = 0.5, group = grpS)
+useRR      = input.bool(false, "Require R:R (to the final target) >=", inline = "rr", group = grpS)
+minRR      = input.float(1.5, "", minval = 0.5, step = 0.25, inline = "rr", group = grpS)
+
+grpD = "Display"
+buyCol  = input.color(#26A69A, "Buy color", group = grpD)
+sellCol = input.color(#EF5350, "Sell color", group = grpD)
+tblOn   = input.bool(true, "Status table", group = grpD)
+extBars = input.int(25, "Entry/stop/target line length (bars)", minval = 5, group = grpD)
+compactTbl  = input.bool(true, "Compact phone-size table", group = grpD)
+tblPosIn    = input.string("Top right", "Table position", options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = grpD)
+zoneFillT   = input.int(75, "Entry zone fill transparency (0-100)", minval = 0, maxval = 100, group = grpD)
+showPending = input.bool(true, "Show the zone before the BOS (dotted, not tradable yet)", group = grpD)
+cleanMode   = input.bool(true, "Clean chart: erase finished setups (keeps live ones + the last trade)", group = grpD)
+histKeep    = input.int(1, "...finished trades left on the chart", minval = 0, maxval = 10, group = grpD)
+
+// ============================== state ==============================
+type Setup
+    int id = 0
+    int dir = 0
+    float eqLvl = na
+    int b1 = na
+    int b2 = na
+    float mid = na
+    int midBar = na
+    int state = 0
+    int bosBar = na
+    float zTop = na
+    float zBot = na
+    bool fvg = false
+    int touches = 0
+    float retExt = na
+    int wrong = 0
+    float entry = na
+    float stop = na
+    float tp1 = na
+    float tp2 = na
+    float origin = na
+    float rr = na
+    int entryBar = na
+    int result = 0
+    string why = ""
+    string reason = ""
+    bool drawnFinal = false
+    bool cleared = false
+    int obBar = na
+    box zbox = na
+    float aTop = na
+    float aBot = na
+    box abox = na
+    line zmid = na
+    label slbl = na
+    array<line> lns = na
+    array<label> lbs = na
+
+var array<Setup> setups = array.new<Setup>()
+var array<int> idc = array.from(0)
+var array<float> phP = array.new<float>()
+var array<int> phB = array.new<int>()
+var array<float> plP = array.new<float>()
+var array<int> plB = array.new<int>()
+var array<string> msgs = array.new<string>()
+var array<int> stats = array.new<int>(4, 0)   // entries, TP1 first, stop first, open
+var table tbl = na
+
+atr = ta.atr(atrLen)
+ph  = ta.pivothigh(high, pivL, pivR)
+pl  = ta.pivotlow(low, pivL, pivR)
+minC = ta.lowest(close, pivR + 1)    // closes since the pivot bar (sweep must close back inside)
+maxC = ta.highest(close, pivR + 1)
+
+// ============================== helpers ==============================
+fmtP(float x) =>
+    na(x) ? "N/A" : str.tostring(x, format.mintick)
+
+stName(int st) =>
+    switch st
+        0 => "EQUAL LEVEL - WAITING FOR BOS"
+        1 => "BOS - WAITING FOR RETEST"
+        2 => "IN ZONE - WAITING FOR CONFIRMATION"
+        3 => "ENTRY VALID"
+        4 => "INVALIDATED"
+        => "PASS"
+
+stShort(int st) =>
+    switch st
+        0 => "WAIT BOS"
+        1 => "WAIT RETEST"
+        2 => "IN ZONE"
+        3 => "ENTRY"
+        4 => "INVALID"
+        => "PASS"
+
+pushPiv(array<float> pa, array<int> ba, float p, int b) =>
+    pa.push(p)
+    ba.push(b)
+    if pa.size() > 200
+        pa.shift()
+        ba.shift()
+    true
+
+addMsg(Setup s, string t) =>
+    msgs.push(syminfo.ticker + " " + timeframe.period + " #" + str.tostring(s.id) + (s.dir == 1 ? " BUY(EQL) " : " SELL(EQH) ") + t)
+    true
+
+dlabel(Setup s, string t) =>
+    if dbgOn
+        label.new(bar_index, s.dir == 1 ? low : high, "#" + str.tostring(s.id) + " " + t, style = s.dir == 1 ? label.style_label_up : label.style_label_down, color = color.new(color.gray, 25), textcolor = color.white, size = size.tiny)
+    true
+
+delSetup(Setup s) =>
+    if not na(s.zbox)
+        box.delete(s.zbox)
+    if not na(s.slbl)
+        label.delete(s.slbl)
+    if not na(s.zmid)
+        line.delete(s.zmid)
+    if not na(s.abox)
+        box.delete(s.abox)
+    if not na(s.lns)
+        for ln in s.lns
+            line.delete(ln)
+    if not na(s.lbs)
+        for lb in s.lbs
+            label.delete(lb)
+    true
+
+isAlive(Setup s) =>
+    s.state <= 2 or (s.state == 3 and s.result == 0)
+
+// nearest distinct structural targets beyond the entry (pivots only; never invented)
+targets(int d, float entry, float a) =>
+    array<float> pa = d == 1 ? phP : plP
+    float t1 = na
+    float t2 = na
+    if pa.size() > 0
+        for i = 0 to pa.size() - 1
+            float q = pa.get(i)
+            if d * (q - entry) >= minTpATR * a and (na(t1) or d * q < d * t1)
+                t1 := q
+        if not na(t1)
+            for i = 0 to pa.size() - 1
+                float q = pa.get(i)
+                if d * (q - t1) >= 0.15 * a and (na(t2) or d * q < d * t2)
+                    t2 := q
+    [t1, t2]
+
+// ============================== main (confirmed bars only) ==============================
+if barstate.isconfirmed
+    msgs.clear()
+    float tol = eqTolATR * atr
+    // ---- new confirmed swing high: look for an equal high -> SELL setup ----
+    if not na(ph)
+        int pb = bar_index - pivR
+        if showSell and phP.size() > 0 and not na(atr)
+            for i = phP.size() - 1 to 0
+                float q = phP.get(i)
+                int qb = phB.get(i)
+                int gap = pb - qb
+                if gap < minGap
+                    continue
+                if gap > maxGap
+                    break
+                // trigger: equal highs, or a SWEEP = new swing high runs a prior swing high and closes back below it
+                bool isEq = useEqT and math.abs(ph - q) <= tol
+                bool isSw = useSwT and not isEq and ph - q > 0.05 * atr and ph - q <= sweepMaxATR * atr and minC < q
+                if isEq or isSw
+                    float top = isEq ? math.max(ph, q) : ph
+                    float lim = isEq ? top + tol : q
+                    bool clean = true
+                    float midv = na
+                    int midb = na
+                    for k = bar_index - pb + 1 to bar_index - qb - 1
+                        if high[k] > lim
+                            clean := false
+                        if na(midv) or low[k] < midv
+                            midv := low[k]
+                            midb := bar_index - k
+                    bool dup = false
+                    for s in setups
+                        if s.dir == -1 and ((s.state <= 2 and math.abs(s.eqLvl - top) <= tol) or s.b2 == qb)
+                            dup := true
+                    if clean and not dup and not na(midv) and top - midv >= minDipATR * atr
+                        Setup s = Setup.new()
+                        idc.set(0, idc.get(0) + 1)
+                        s.id := idc.get(0)
+                        s.dir := -1
+                        s.eqLvl := top
+                        s.b1 := qb
+                        s.b2 := pb
+                        s.mid := midv
+                        s.midBar := midb
+                        s.lns := array.new<line>()
+                        s.lbs := array.new<label>()
+                        s.lns.push(line.new(qb, q, pb, ph, color = color.new(sellCol, 20), style = line.style_dotted, width = 2))
+                        s.lbs.push(label.new(pb, top, isEq ? "EQH" : "SWEEP", style = label.style_label_down, color = color.new(sellCol, 70), textcolor = color.white, size = size.tiny))
+                        int offB = bar_index - pb
+                        int kOb = offB
+                        for k = offB to offB + obLook
+                            if close[k] > open[k]
+                                kOb := k
+                                break
+                        float zh = high[kOb]
+                        float zl = low[kOb]
+                        if zh - zl > obMaxATR * atr
+                            zh := math.max(open[kOb], close[kOb])
+                            zl := math.min(open[kOb], close[kOb])
+                        s.zTop := zh
+                        s.zBot := zl
+                        s.obBar := bar_index - kOb
+                        if showPending
+                            s.zbox := box.new(s.obBar, zh, bar_index, zl, border_color = color.new(sellCol, 40), border_style = line.style_dotted, bgcolor = color.new(sellCol, 93), text = "sell zone (needs BOS)", text_color = color.new(sellCol, 30), text_size = size.tiny, text_halign = text.align_right, text_valign = text.align_top)
+                        // previous low/high the move into the equal level started from (TP2)
+                        float org = na
+                        for k = bar_index - qb to bar_index - qb + originLook
+                            if k > bar_index - qb and high[k] > top + tol and not na(org) and top - org >= originMinATR * atr
+                                break
+                            if na(org) or low[k] < org
+                                org := low[k]
+                        s.origin := org
+                        setups.push(s)
+                        dlabel(s, "EQUAL HIGHS " + fmtP(top) + " | middle low " + fmtP(midv))
+                    break
+        pushPiv(phP, phB, ph, pb)
+    // ---- new confirmed swing low: look for an equal low -> BUY setup ----
+    if not na(pl)
+        int pb = bar_index - pivR
+        if showBuy and plP.size() > 0 and not na(atr)
+            for i = plP.size() - 1 to 0
+                float q = plP.get(i)
+                int qb = plB.get(i)
+                int gap = pb - qb
+                if gap < minGap
+                    continue
+                if gap > maxGap
+                    break
+                bool isEq = useEqT and math.abs(pl - q) <= tol
+                bool isSw = useSwT and not isEq and q - pl > 0.05 * atr and q - pl <= sweepMaxATR * atr and maxC > q
+                if isEq or isSw
+                    float bot = isEq ? math.min(pl, q) : pl
+                    float lim = isEq ? bot - tol : q
+                    bool clean = true
+                    float midv = na
+                    int midb = na
+                    for k = bar_index - pb + 1 to bar_index - qb - 1
+                        if low[k] < lim
+                            clean := false
+                        if na(midv) or high[k] > midv
+                            midv := high[k]
+                            midb := bar_index - k
+                    bool dup = false
+                    for s in setups
+                        if s.dir == 1 and ((s.state <= 2 and math.abs(s.eqLvl - bot) <= tol) or s.b2 == qb)
+                            dup := true
+                    if clean and not dup and not na(midv) and midv - bot >= minDipATR * atr
+                        Setup s = Setup.new()
+                        idc.set(0, idc.get(0) + 1)
+                        s.id := idc.get(0)
+                        s.dir := 1
+                        s.eqLvl := bot
+                        s.b1 := qb
+                        s.b2 := pb
+                        s.mid := midv
+                        s.midBar := midb
+                        s.lns := array.new<line>()
+                        s.lbs := array.new<label>()
+                        s.lns.push(line.new(qb, q, pb, pl, color = color.new(buyCol, 20), style = line.style_dotted, width = 2))
+                        s.lbs.push(label.new(pb, bot, isEq ? "EQL" : "SWEEP", style = label.style_label_up, color = color.new(buyCol, 70), textcolor = color.white, size = size.tiny))
+                        int offB = bar_index - pb
+                        int kOb = offB
+                        for k = offB to offB + obLook
+                            if close[k] < open[k]
+                                kOb := k
+                                break
+                        float zh = high[kOb]
+                        float zl = low[kOb]
+                        if zh - zl > obMaxATR * atr
+                            zh := math.max(open[kOb], close[kOb])
+                            zl := math.min(open[kOb], close[kOb])
+                        s.zTop := zh
+                        s.zBot := zl
+                        s.obBar := bar_index - kOb
+                        if showPending
+                            s.zbox := box.new(s.obBar, zh, bar_index, zl, border_color = color.new(buyCol, 40), border_style = line.style_dotted, bgcolor = color.new(buyCol, 93), text = "buy zone (needs BOS)", text_color = color.new(buyCol, 30), text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_bottom)
+                        // previous low/high the move into the equal level started from (TP2)
+                        float org = na
+                        for k = bar_index - qb to bar_index - qb + originLook
+                            if k > bar_index - qb and low[k] < bot - tol and not na(org) and org - bot >= originMinATR * atr
+                                break
+                            if na(org) or high[k] > org
+                                org := high[k]
+                        s.origin := org
+                        setups.push(s)
+                        dlabel(s, "EQUAL LOWS " + fmtP(bot) + " | middle high " + fmtP(midv))
+                    break
+        pushPiv(plP, plB, pl, pb)
+
+    // ---- advance every setup ----
+    if setups.size() > 0
+        for s in setups
+            int d = s.dir
+            int n = bar_index
+            color c = d == 1 ? buyCol : sellCol
+            // 0: equal level found, waiting for the break of the middle swing
+            if s.state == 0
+                if n - s.b2 > bosMaxBars
+                    s.state := 5
+                    s.reason := "no BOS within " + str.tostring(bosMaxBars) + " bars"
+                    dlabel(s, "PASS: no BOS")
+                else if d * (s.eqLvl - close) > tol
+                    s.state := 5
+                    s.reason := "equal level taken out before the BOS"
+                    dlabel(s, "PASS: equal level broken first")
+                else if d * (close - s.mid) > beyondATR * atr
+                    // BOS: the order block was fixed when the equal level was found (frozen, never moves)
+                    int offB = n - s.b2
+                    // fair value gap anywhere in the break leg
+                    if offB >= 2
+                        for k = 0 to offB - 2
+                            if (d == 1 and low[k] > high[k + 2]) or (d == -1 and high[k] < low[k + 2])
+                                s.fvg := true
+                    s.bosBar := n
+                    // advance water block: last opposite candle before the breaking candle, back to the 2nd touch (frozen)
+                    int kA = -1
+                    if offB >= 2
+                        for k = 1 to offB - 1
+                            if d * (close[k] - open[k]) < 0
+                                kA := k
+                                break
+                    if kA < 0
+                        s.aTop := math.max(open, close)
+                        s.aBot := math.min(open, close)
+                    else
+                        s.aTop := high[kA]
+                        s.aBot := low[kA]
+                        if high[kA] - low[kA] > obMaxATR * atr
+                            s.aTop := math.max(open[kA], close[kA])
+                            s.aBot := math.min(open[kA], close[kA])
+                    s.lns.push(line.new(s.midBar, s.mid, n, s.mid, color = c, style = line.style_dashed))
+                    s.lbs.push(label.new(n, s.mid, "BOS", style = d == 1 ? label.style_label_down : label.style_label_up, color = color.new(c, 60), textcolor = color.white, size = size.tiny))
+                    if needFVG and not s.fvg
+                        s.state := 5
+                        s.reason := "no fair value gap in the break leg"
+                        dlabel(s, "PASS: no FVG")
+                    else
+                        s.state := 1
+                        if na(s.zbox)
+                            s.zbox := box.new(s.obBar, s.zTop, n, s.zBot)
+                        box.set_border_color(s.zbox, c)
+                        box.set_border_style(s.zbox, line.style_solid)
+                        box.set_border_width(s.zbox, 2)
+                        box.set_bgcolor(s.zbox, color.new(c, zoneFillT))
+                        box.set_text(s.zbox, useAdv ? "stop area" : (d == 1 ? "BUY ZONE" : "SELL ZONE") + (s.fvg ? " (OB+FVG)" : " (OB)"))
+                        box.set_text_color(s.zbox, color.white)
+                        box.set_text_size(s.zbox, size.small)
+                        box.set_text_halign(s.zbox, text.align_right)
+                        box.set_text_valign(s.zbox, text.align_center)
+                        if useAdv
+                            box.set_bgcolor(s.zbox, color.new(c, 90))
+                            box.set_border_width(s.zbox, 1)
+                            box.set_text_size(s.zbox, size.tiny)
+                            box.set_text_valign(s.zbox, d == 1 ? text.align_bottom : text.align_top)
+                            s.abox := box.new(n - (kA < 0 ? 0 : kA), s.aTop, n, s.aBot, border_color = c, border_width = 2, bgcolor = color.new(c, zoneFillT), text = d == 1 ? "BUY ZONE" : "SELL ZONE", text_color = color.white, text_size = size.tiny, text_halign = text.align_right, text_valign = text.align_center)
+                            s.zmid := line.new(n - (kA < 0 ? 0 : kA), (s.aTop + s.aBot) / 2, n, (s.aTop + s.aBot) / 2, color = color.new(color.white, 40), style = line.style_dashed)
+                        else
+                            s.zmid := line.new(s.obBar, (s.zTop + s.zBot) / 2, n, (s.zTop + s.zBot) / 2, color = color.new(color.white, 40), style = line.style_dashed)
+                        addMsg(s, "BOS - order block " + fmtP(s.zBot) + "-" + fmtP(s.zTop) + (s.fvg ? " + FVG" : ""))
+                        dlabel(s, "BOS, OB " + fmtP(s.zBot) + "-" + fmtP(s.zTop) + (s.fvg ? " + FVG" : ""))
+                else
+                    s.why := "waiting for a close beyond " + fmtP(s.mid)
+            // 1-2: after the BOS - invalidation, expiry, retest, confirmation
+            if s.state == 1 or s.state == 2
+                // entry at the near edge of the entry zone; stop/invalidation beyond the TOP block's far edge
+                float near = useAdv ? (d == 1 ? s.aTop : s.aBot) : (d == 1 ? s.zTop : s.zBot)
+                float far = d == 1 ? s.zBot : s.zTop
+                bool wrongClose = d * (far - close) > invBufATR * atr
+                s.wrong := wrongClose ? s.wrong + 1 : 0
+                if s.wrong >= invAccept or (killOnEQ and d * (s.eqLvl - close) > tol)
+                    s.state := 4
+                    s.reason := s.wrong >= invAccept ? str.tostring(s.wrong) + " closes beyond the zone" : "closed beyond the equal level"
+                    addMsg(s, "INVALIDATED: " + s.reason)
+                    dlabel(s, "INVALIDATED")
+                else if n - s.bosBar > retestMax
+                    s.state := 5
+                    s.reason := "no retest within " + str.tostring(retestMax) + " bars"
+                    dlabel(s, "PASS: no retest")
+                else
+                    bool touched = d == 1 ? low <= near : high >= near
+                    if s.state == 1 and touched and n > s.bosBar
+                        s.state := 2
+                        s.touches += 1
+                        s.retExt := d == 1 ? low : high
+                        addMsg(s, "RETEST of the order block")
+                        dlabel(s, "RETEST")
+                    if s.state == 2
+                        s.retExt := d == 1 ? math.min(s.retExt, low) : math.max(s.retExt, high)
+                        bool confirm = entryMode == "Touch of the zone" ? true : (d * (close - near) > 0 and d * (close - open) > 0)
+                        if confirm
+                            float ent = entryMode == "Touch of the zone" ? near : close
+                            // Stop: just beyond the zone's far edge (default), or beyond the equal level / retest extreme
+                            float rawStop = stopMode == "Beyond the zone" ? far - d * stopBufATR * atr : (d == 1 ? math.min(s.retExt, math.min(far, s.eqLvl)) : math.max(s.retExt, math.max(far, s.eqLvl))) - d * stopBufATR * atr
+                            float risk = d * (ent - rawStop)
+                            s.entry := ent
+                            s.stop := risk >= minRiskATR * atr and risk <= maxRiskATR * atr ? rawStop : na
+                            [t1, t2] = targets(d, ent, atr)
+                            s.tp1 := t1
+                            s.tp2 := t2
+                            float og = useOrigin and not na(s.origin) and d * (s.origin - ent) >= minTpATR * atr ? s.origin : na
+                            if not na(og)
+                                // TP1 = nearest swing before the previous low/high; TP2 = the previous low/high itself
+                                s.tp1 := not na(t1) and d * (og - t1) >= 0.15 * atr ? t1 : og
+                                s.tp2 := s.tp1 == og ? na : og
+                            float fin = not na(s.tp2) ? s.tp2 : s.tp1
+                            s.rr := not na(s.stop) and not na(fin) ? d * (fin - ent) / risk : na
+                            string fail = na(s.stop) ? "no structural stop inside the risk limits" : useRR and (na(s.rr) or s.rr < minRR) ? "R:R " + (na(s.rr) ? "N/A (no target)" : str.tostring(s.rr, "0.0")) + " < " + str.tostring(minRR, "0.0") : ""
+                            if fail == ""
+                                s.state := 3
+                                s.entryBar := n
+                                stats.set(0, stats.get(0) + 1)
+                                stats.set(3, stats.get(3) + 1)
+                                int x2 = n + extBars
+                                s.lns.push(line.new(n, s.entry, x2, s.entry, color = c, width = 2))
+                                s.lns.push(line.new(n, s.stop, x2, s.stop, color = color.new(color.gray, 0), style = line.style_dotted))
+                                s.lbs.push(label.new(x2, s.stop, "STOP " + fmtP(s.stop), style = label.style_label_left, color = color.new(color.gray, 30), textcolor = color.white, size = size.tiny))
+                                if not na(s.tp1)
+                                    s.lns.push(line.new(n, s.tp1, x2, s.tp1, color = c, style = line.style_dashed))
+                                    s.lbs.push(label.new(x2, s.tp1, "TP1 " + fmtP(s.tp1) + (s.tp1 == s.origin ? (d == 1 ? " (prev high)" : " (prev low)") : ""), style = label.style_label_left, color = color.new(c, 40), textcolor = color.white, size = size.tiny))
+                                if not na(s.tp2)
+                                    s.lns.push(line.new(n, s.tp2, x2, s.tp2, color = c, style = line.style_dashed))
+                                    s.lbs.push(label.new(x2, s.tp2, "TP2 " + fmtP(s.tp2) + (s.tp2 == s.origin ? (d == 1 ? " (prev high)" : " (prev low)") : ""), style = label.style_label_left, color = color.new(c, 40), textcolor = color.white, size = size.tiny))
+                                s.lbs.push(label.new(n, d == 1 ? low : high, (d == 1 ? "BUY" : "SELL") + (s.fvg ? " OB+FVG" : " OB"), style = d == 1 ? label.style_label_up : label.style_label_down, color = c, textcolor = color.white, size = size.small))
+                                addMsg(s, "ENTRY " + (d == 1 ? "BUY" : "SELL") + " " + fmtP(s.entry) + " stop " + fmtP(s.stop) + " TP1 " + fmtP(s.tp1))
+                            else
+                                s.state := 5
+                                s.reason := "confirmed but filtered: " + fail
+                                dlabel(s, "PASS: " + fail)
+                        else
+                            s.why := "in the zone, waiting for a rejection close"
+                    else if s.state == 1
+                        s.why := "waiting for price to return to the order block"
+            // 3: track which comes first (stop assumed first if both in one bar)
+            if s.state == 3 and s.result == 0 and n > s.entryBar
+                bool stopHit = d == 1 ? low <= s.stop : high >= s.stop
+                bool tpHit = not na(s.tp1) and (d == 1 ? high >= s.tp1 : low <= s.tp1)
+                if stopHit
+                    s.result := 1
+                    stats.set(2, stats.get(2) + 1)
+                    stats.set(3, stats.get(3) - 1)
+                else if tpHit
+                    s.result := 2
+                    stats.set(1, stats.get(1) + 1)
+                    stats.set(3, stats.get(3) - 1)
+            // drawings upkeep
+            if not na(s.zbox)
+                if isAlive(s)
+                    box.set_right(s.zbox, n)
+                    if not na(s.abox)
+                        box.set_right(s.abox, n)
+                    if not na(s.zmid)
+                        line.set_x2(s.zmid, n)
+                else if not s.drawnFinal
+                    box.set_right(s.zbox, n)
+                    box.set_border_color(s.zbox, color.new(color.gray, 30))
+                    box.set_bgcolor(s.zbox, color.new(color.gray, 92))
+                    box.set_text(s.zbox, cleanMode ? "" : stShort(s.state))
+                    box.set_text_color(s.zbox, color.new(color.gray, 20))
+                    if not na(s.abox)
+                        box.set_right(s.abox, n)
+                        box.set_border_color(s.abox, color.new(color.gray, 30))
+                        box.set_bgcolor(s.abox, color.new(color.gray, 92))
+                        box.set_text(s.abox, "")
+                    if not na(s.zmid)
+                        line.set_x2(s.zmid, n)
+                    s.drawnFinal := true
+    // clean chart: erase drawings of finished setups, newest histKeep trades excepted
+    if cleanMode and setups.size() > 0
+        int kept = 0
+        for i = setups.size() - 1 to 0
+            Setup e = setups.get(i)
+            if not isAlive(e) and not e.cleared
+                if e.state == 3 and kept < histKeep
+                    kept += 1
+                else
+                    delSetup(e)
+                    e.cleared := true
+    // keep the chart readable: drop the oldest finished setups first
+    while setups.size() > maxKeep
+        int idx = 0
+        for i = 0 to setups.size() - 1
+            if not isAlive(setups.get(i))
+                idx := i
+                break
+        Setup old = setups.remove(idx)
+        delSetup(old)
+    if msgs.size() > 0
+        alert(msgs.join("\n"), alert.freq_once_per_bar_close)
+
+// ============================== table (display only) ==============================
+tposv = switch tblPosIn
+    "Top left" => position.top_left
+    "Bottom right" => position.bottom_right
+    "Bottom left" => position.bottom_left
+    => position.top_right
+
+if barstate.islast and tblOn
+    if na(tbl)
+        tbl := table.new(tposv, 2, compactTbl ? 7 : 13, border_width = compactTbl ? 0 : 1, frame_color = color.new(color.gray, 60), frame_width = compactTbl ? 0 : 1, bgcolor = color.new(#101418, 25))
+    Setup cur = na
+    if setups.size() > 0
+        for s in setups
+            if s.state <= 3 and s.result == 0
+                cur := s
+    color bg = color.new(#101418, 5)
+    string rec = str.tostring(stats.get(0)) + " | TP1 " + str.tostring(stats.get(1)) + " | SL " + str.tostring(stats.get(2))
+    if compactTbl
+        array<string> lab = array.from("Setup", "Zone", "Entry / Stop", "TP1 / TP2", "R:R", "Record")
+        array<string> val = array.new<string>(6, "-")
+        table.cell(tbl, 0, 0, "EQ OB", text_color = color.white, text_size = size.tiny, text_halign = text.align_left)
+        table.cell(tbl, 1, 0, "UNVALIDATED", text_color = color.orange, text_size = size.tiny, text_halign = text.align_left)
+        if not na(cur)
+            val.set(0, (cur.dir == 1 ? "BUY " : "SELL ") + stShort(cur.state))
+            val.set(1, useAdv and not na(cur.aTop) ? fmtP(cur.aBot) + " - " + fmtP(cur.aTop) : fmtP(cur.zBot) + " - " + fmtP(cur.zTop))
+            val.set(2, cur.state == 3 ? fmtP(cur.entry) + " / " + fmtP(cur.stop) : "N/A")
+            val.set(3, cur.state == 3 ? fmtP(cur.tp1) + " / " + fmtP(cur.tp2) : "N/A")
+            val.set(4, cur.state == 3 and not na(cur.rr) ? str.tostring(cur.rr, "0.0") : "N/A")
+        else
+            val.set(0, "None live")
+            if setups.size() > 0
+                for i = setups.size() - 1 to 0
+                    Setup e = setups.get(i)
+                    if e.state >= 3
+                        lab.set(2, "Last setup")
+                        lab.set(3, "Why")
+                        val.set(1, "last: " + (useAdv and not na(e.aTop) ? fmtP(e.aBot) + " - " + fmtP(e.aTop) : fmtP(e.zBot) + " - " + fmtP(e.zTop)))
+                        val.set(2, "last: " + stShort(e.state) + (e.state == 3 ? (e.result == 1 ? " (stopped)" : e.result == 2 ? " (TP1 hit)" : "") : ""))
+                        val.set(3, e.reason != "" ? e.reason : "-")
+                        break
+        val.set(5, rec)
+        for i = 0 to 5
+            table.cell(tbl, 0, i + 1, lab.get(i), text_color = color.new(color.white, 35), text_size = size.tiny, text_halign = text.align_left)
+            table.cell(tbl, 1, i + 1, val.get(i), text_color = i == 0 and not na(cur) ? (cur.dir == 1 ? buyCol : sellCol) : color.white, text_size = size.tiny, text_halign = text.align_left)
+    else
+        table.cell(tbl, 0, 0, "EQ LIQUIDITY OB", text_color = color.white, bgcolor = color.new(#1c2128, 0), text_size = size.small)
+        table.cell(tbl, 1, 0, "UNVALIDATED", text_color = color.orange, bgcolor = color.new(#1c2128, 0), text_size = size.small)
+        array<string> lab = array.from("Direction", "Equal level", "BOS level", "Order block", "FVG in leg", "Status", "Entry", "Stop", "TP1", "TP2", "R:R", "Record")
+        array<string> val = array.new<string>(12, "")
+        if na(cur)
+            val.set(0, "PASS")
+            val.set(5, "No live equal-level setup")
+        else
+            int d = cur.dir
+            val.set(0, d == 1 ? "BUY (equal lows)" : "SELL (equal highs)")
+            val.set(1, fmtP(cur.eqLvl))
+            val.set(2, fmtP(cur.mid))
+            val.set(3, fmtP(cur.zBot) + " - " + fmtP(cur.zTop))
+            val.set(4, cur.state >= 1 ? (cur.fvg ? "yes" : "no") : "-")
+            val.set(5, stName(cur.state) + (cur.why != "" and cur.state <= 2 ? ": " + cur.why : ""))
+            val.set(6, cur.state == 3 ? fmtP(cur.entry) : "N/A")
+            val.set(7, cur.state == 3 ? fmtP(cur.stop) : "N/A")
+            val.set(8, cur.state == 3 ? fmtP(cur.tp1) : "N/A")
+            val.set(9, cur.state == 3 ? fmtP(cur.tp2) : "N/A")
+            val.set(10, cur.state == 3 and not na(cur.rr) ? str.tostring(cur.rr, "0.0") : "N/A")
+        val.set(11, rec)
+        for i = 0 to 11
+            table.cell(tbl, 0, i + 1, lab.get(i), text_color = color.new(color.white, 25), bgcolor = bg, text_size = size.tiny, text_halign = text.align_left)
+            table.cell(tbl, 1, i + 1, val.get(i), text_color = color.white, bgcolor = bg, text_size = size.tiny, text_halign = text.align_left)

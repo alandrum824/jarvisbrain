@@ -1,0 +1,374 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0
+// © TWI — Trading With Integrity. TWI Precision Structure (indicator). Spec: spec.md v1.0
+// Signals fire only on CONFIRMED bar closes. HTF data = previous closed HTF bar ([1] + lookahead_on): no repaint.
+// NOT executed in TradingView by the author (no compiler available); see repaint_code_review_checklist.md before use.
+//@version=6
+indicator("TWI Precision Structure", shorttitle = "TWI-PS", overlay = true, max_boxes_count = 60, max_lines_count = 150, max_labels_count = 150, max_bars_back = 500)
+
+// ───────────────────────── Inputs ─────────────────────────
+grpS = "Structure"
+pivLen   = input.int(3, "Pivot length (left = right)", minval = 1, group = grpS)
+atrLen   = input.int(14, "ATR length", minval = 1, group = grpS)
+dispMult = input.float(0.8, "Displacement: BOS body >= x ATR", step = 0.1, group = grpS)
+useDisp  = input.bool(true, "Require displacement", group = grpS)
+grpH = "Higher timeframe"
+useHTF   = input.bool(true, "Require HTF bias", group = grpH)
+htfTF    = input.timeframe("60", "HTF (H1 for M15, M15 for M5)", group = grpH)
+grpZ = "Zones"
+zoneAge  = input.int(20, "Zone age limit (bars)", minval = 1, group = grpZ)
+zMin     = input.float(0.10, "Min zone height x ATR", step = 0.05, group = grpZ)
+zMax     = input.float(1.50, "Max zone height x ATR", step = 0.05, group = grpZ)
+fvgOnly  = input.bool(false, "FVG zones only", group = grpZ)
+useCorr  = input.bool(false, "Corrective return only (skip impulsive approach)", group = grpZ)
+useMom   = input.bool(false, "Skip momentum candle through zone", group = grpZ)
+grpR = "Risk / filters"
+slBuf    = input.float(0.20, "SL buffer x ATR", step = 0.05, group = grpR)
+rMin     = input.float(0.30, "Min risk x ATR", step = 0.05, group = grpR)
+rMax     = input.float(3.00, "Max risk x ATR", step = 0.1, group = grpR)
+rr       = input.float(2.0, "Reward : risk", minval = 1.0, step = 0.1, group = grpR)
+costPx   = input.float(0.47, "Round-trip cost in price (spread+comm+slip; gold ~0.47, EURUSD ~0.0001)", step = 0.01, group = grpR)
+useCost  = input.bool(true, "Cost filter (cost <= x% of risk)", group = grpR)
+costMax  = input.float(0.10, "Max cost / risk", step = 0.01, group = grpR)
+useBlock = input.bool(true, "Block if opposing swing inside the target", group = grpR)
+useScore = input.bool(true, "Use score gate", group = grpR)
+minScore = input.int(90, "Min score (checklist, not probability)", minval = 0, maxval = 100, group = grpR)
+grpB = "Strategy B (patterns)"
+enableA  = input.bool(true, "Enable Strategy A (BOS -> zone -> retest)", group = grpB)
+enableB  = input.bool(false, "Enable Strategy B (double top/bottom, H&S)", group = grpB)
+useHTFB  = input.bool(false, "Strategy B: require HTF bias", group = grpB)
+
+// ───────────────────────── Core series ─────────────────────────
+atrV = ta.atr(atrLen)
+ph = ta.pivothigh(high, pivLen, pivLen)
+pl = ta.pivotlow(low, pivLen, pivLen)
+int phBar = not na(ph) ? bar_index - pivLen : na
+int plBar = not na(pl) ? bar_index - pivLen : na
+
+// HTF bias from confirmed HTF pivots. Non-repainting: previous closed HTF bar ([1]) with lookahead_on.
+f_bias() =>
+    hp = ta.pivothigh(high, pivLen, pivLen)
+    lp = ta.pivotlow(low, pivLen, pivLen)
+    var float h1 = na
+    var float h2 = na
+    var float l1 = na
+    var float l2 = na
+    if not na(hp)
+        h2 := h1
+        h1 := hp
+    if not na(lp)
+        l2 := l1
+        l1 := lp
+    int b = 0
+    if not na(h2) and not na(l2)
+        b := h1 > h2 and l1 > l2 ? 1 : h1 < h2 and l1 < l2 ? -1 : 0
+    b
+htfBias = request.security(syminfo.tickerid, htfTF, f_bias()[1], lookahead = barmerge.lookahead_on)
+htfB = nz(htfBias, 0)
+
+// ───────────────────────── Strategy A engine (long logic; shorts call it on mirrored prices) ─────────────────────────
+f_engineA(float o_, float h_, float l_, float c_, float swV, int swBar, float lowV, int lowBar, int biasDir, float a) =>
+    var float sw = na
+    var int swI = na
+    var bool swBroken = true
+    var int legStart = na
+    var array<float> hiVals = array.new<float>()
+    var array<int> hiBars = array.new<int>()
+    var bool evOn = false
+    var int evB = na
+    var float zb = na
+    var float zt = na
+    var int zq = 0
+    var string zName = ""
+    var bool evDisp = false
+    var bool evHtf = false
+    bool sig = false
+    float ent = na
+    float sl = na
+    float tp = na
+    int score = 0
+    bool bos = false
+    bool newZone = false
+    if not na(swV)
+        sw := swV
+        swI := swBar
+        swBroken := false
+        array.push(hiVals, swV)
+        array.push(hiBars, bar_index)
+    if not na(lowV)
+        legStart := lowBar
+    while array.size(hiBars) > 0 and bar_index - array.get(hiBars, 0) > 100
+        array.shift(hiBars)
+        array.shift(hiVals)
+    // 1) retest of an active zone
+    if evOn and bar_index > evB
+        if c_ < zb or bar_index > evB + zoneAge
+            evOn := false
+        else if l_ <= zt
+            bool corrBad = false
+            if useCorr
+                for q = 0 to 4
+                    if bar_index - q > evB and (o_[q] - c_[q]) >= 0.8 * a[q]
+                        corrBad := true
+            bool momBad = useMom and (o_ - c_) >= 1.0 * a and c_ < (zb + zt) / 2
+            if corrBad or momBad
+                evOn := false
+            else if c_ > zt and c_ > o_
+                float e = c_
+                float s = math.min(zb, l_) - slBuf * a
+                float r = e - s
+                bool ok = r >= rMin * a and r <= rMax * a
+                if ok and useCost and costPx > costMax * r
+                    ok := false
+                float t = e + rr * r
+                if ok and useBlock and array.size(hiVals) > 0
+                    for i = 0 to array.size(hiVals) - 1
+                        float v = array.get(hiVals, i)
+                        if v > e and v < t
+                            ok := false
+                bool engulf = (c_ - o_) >= math.abs(c_[1] - o_[1]) and o_ <= math.min(o_[1], c_[1]) and c_ >= math.max(o_[1], c_[1])
+                bool pin = math.min(o_, c_) - l_ >= 2 * math.abs(c_ - o_)
+                int sc = (evHtf ? 25 : 0) + (evDisp ? 25 : 0) + zq + 20 + (engulf or pin ? 10 : 0)
+                if ok and useScore and sc < minScore
+                    ok := false
+                if ok
+                    sig := true
+                    ent := e
+                    sl := s
+                    tp := t
+                    score := sc
+                evOn := false
+    // 2) new break of structure
+    if not swBroken and not na(sw) and c_ > sw
+        swBroken := true
+        bool disp = (c_ - o_) >= dispMult * a
+        bool htfOk = biasDir > 0
+        if (not useDisp or disp) and (not useHTF or htfOk)
+            bos := true
+            int leg0 = (not na(legStart) and legStart >= 0 and legStart < bar_index) ? legStart : math.max(0, nz(swI, 0))
+            bool found = false
+            float nzb = na
+            float nzt = na
+            int nq = 0
+            string nn = ""
+            int depth = math.min(bar_index - math.max(leg0, 1) - 2, 300)
+            if depth >= 0
+                for k = 0 to depth
+                    if l_[k] > h_[k + 2]
+                        float hg = l_[k] - h_[k + 2]
+                        if hg >= zMin * a and hg <= zMax * a
+                            nzb := h_[k + 2]
+                            nzt := l_[k]
+                            nq := 20
+                            nn := "FVG"
+                            found := true
+                            break
+            if not found and not fvgOnly
+                int d2 = math.min(bar_index - leg0, 300)
+                if d2 >= 1
+                    for k = 1 to d2
+                        if c_[k] < o_[k]
+                            float hg2 = math.max(o_[k], c_[k]) - l_[k]
+                            if hg2 >= zMin * a and hg2 <= zMax * a
+                                nzb := l_[k]
+                                nzt := math.max(o_[k], c_[k])
+                                nq := 15
+                                nn := "Demand/OB"
+                                found := true
+                                break
+            if not found and not fvgOnly
+                nzb := sw - 0.25 * a
+                nzt := sw
+                nq := 10
+                nn := "Retest"
+                found := true
+            if found
+                evOn := true
+                evB := bar_index
+                zb := nzb
+                zt := nzt
+                zq := nq
+                zName := nn
+                evDisp := disp
+                evHtf := htfOk
+                newZone := true
+    [sig, ent, sl, tp, score, bos, newZone, zb, zt, zName, evOn]
+
+// ───────────────────────── Strategy B engine (double bottom / inverse H&S; tops on mirrored prices) ─────────────────────────
+f_engineB(float o_, float h_, float l_, float c_, float lowV, int lowBar, int biasDir, float a) =>
+    var array<float> lv = array.new<float>()
+    var array<int> lb = array.new<int>()
+    var array<float> pNeck = array.new<float>()
+    var array<int> pConf = array.new<int>()
+    var array<int> pBrk = array.new<int>()
+    bool sig = false
+    float ent = na
+    float sl = na
+    float tp = na
+    if not na(lowV)
+        array.push(lv, lowV)
+        array.push(lb, lowBar)
+        if array.size(lv) > 3
+            array.shift(lv)
+            array.shift(lb)
+        int n = array.size(lv)
+        if n >= 2
+            float p1 = array.get(lv, n - 2)
+            float p2 = array.get(lv, n - 1)
+            int i1 = array.get(lb, n - 2)
+            int i2 = array.get(lb, n - 1)
+            if math.abs(p1 - p2) <= 0.30 * a and i2 - i1 >= 5 and bar_index - i1 <= 300
+                float nk = h_[bar_index - i2]
+                for k = bar_index - i2 to bar_index - i1
+                    nk := math.max(nk, h_[k])
+                if nk - math.max(p1, p2) >= 1.0 * a
+                    array.push(pNeck, nk)
+                    array.push(pConf, bar_index)
+                    array.push(pBrk, -1)
+        if n >= 3
+            float s1 = array.get(lv, 0)
+            float hd = array.get(lv, 1)
+            float s3 = array.get(lv, 2)
+            int j1 = array.get(lb, 0)
+            int j3 = array.get(lb, 2)
+            if hd < s1 - 0.3 * a and hd < s3 - 0.3 * a and math.abs(s1 - s3) <= 0.5 * a and bar_index - j1 <= 300
+                float nk2 = h_[bar_index - j3]
+                for k = bar_index - j3 to bar_index - j1
+                    nk2 := math.max(nk2, h_[k])
+                array.push(pNeck, nk2)
+                array.push(pConf, bar_index)
+                array.push(pBrk, -1)
+    int m = array.size(pNeck)
+    if m > 0
+        for i = m - 1 to 0
+            float nk = array.get(pNeck, i)
+            int cf = array.get(pConf, i)
+            int bk = array.get(pBrk, i)
+            bool drop = false
+            if bk < 0
+                if bar_index - cf > 30
+                    drop := true
+                else if bar_index > cf and c_ > nk and (c_ - o_) >= 0.5 * a
+                    array.set(pBrk, i, bar_index)
+            else if bar_index > bk
+                if bar_index - bk > 20 or c_ < nk - 0.5 * a
+                    drop := true
+                else if l_ <= nk + 0.10 * a and c_ > nk and c_ > o_
+                    float e = c_
+                    float s = l_ - 0.20 * a
+                    float r = e - s
+                    bool ok = r >= rMin * a and r <= rMax * a and (not useCost or costPx <= costMax * r)
+                    if ok and useHTFB and biasDir <= 0
+                        ok := false
+                    if ok and not sig
+                        sig := true
+                        ent := e
+                        sl := s
+                        tp := e + rr * r
+                    drop := true
+            if drop
+                array.remove(pNeck, i)
+                array.remove(pConf, i)
+                array.remove(pBrk, i)
+    [sig, ent, sl, tp]
+
+// ───────────────────────── Run engines (long + mirrored short) ─────────────────────────
+[aL, eL, sL, tL, scL, bosL, nzL, zbL, ztL, znL, onL] = f_engineA(open, high, low, close, ph, phBar, pl, plBar, htfB, atrV)
+[aS, eSm, sSm, tSm, scS, bosS, nzS, zbSm, ztSm, znS, onS] = f_engineA(-open, -low, -high, -close, -pl, plBar, -ph, phBar, -htfB, atrV)
+[bL, beL, bsL, btL] = f_engineB(open, high, low, close, pl, plBar, htfB, atrV)
+[bS, beSm, bsSm, btSm] = f_engineB(-open, -low, -high, -close, -ph, phBar, -htfB, atrV)
+
+longA  = enableA and aL and barstate.isconfirmed
+shortA = enableA and aS and barstate.isconfirmed
+longB  = enableB and bL and barstate.isconfirmed
+shortB = enableB and bS and barstate.isconfirmed
+longSig  = longA or longB
+shortSig = shortA or shortB
+sigEntry = longA ? eL : shortA ? -eSm : longB ? beL : shortB ? -beSm : na
+sigSL    = longA ? sL : shortA ? -sSm : longB ? bsL : shortB ? -bsSm : na
+sigTP    = longA ? tL : shortA ? -tSm : longB ? btL : shortB ? -btSm : na
+sigScore = longA ? scL : shortA ? scS : 0
+
+// ───────────────────────── Visuals ─────────────────────────
+grpV = "Display"
+showZones  = input.bool(true, "Show zones", group = grpV)
+showStruct = input.bool(true, "Show BOS labels", group = grpV)
+showLevels = input.bool(true, "Show entry / SL / TP lines", group = grpV)
+showDash   = input.bool(true, "Show dashboard", group = grpV)
+maxObjs    = input.int(20, "Max zones / signal drawings kept", minval = 1, maxval = 40, group = grpV)
+
+var array<box>   zoneBoxes = array.new<box>()
+var array<line>  lvlLines  = array.new<line>()
+var array<label> sigLabels = array.new<label>()
+
+f_capBoxes(array<box> arr, int cap) =>
+    while array.size(arr) > cap
+        box.delete(array.shift(arr))
+f_capLines(array<line> arr, int cap) =>
+    while array.size(arr) > cap
+        line.delete(array.shift(arr))
+f_capLabels(array<label> arr, int cap) =>
+    while array.size(arr) > cap
+        label.delete(array.shift(arr))
+
+if enableA and showZones and barstate.isconfirmed
+    if nzL
+        array.push(zoneBoxes, box.new(bar_index, ztL, bar_index + zoneAge, zbL, border_color = color.new(color.teal, 0), bgcolor = color.new(color.teal, 80), text = znL, text_color = color.teal, text_size = size.tiny))
+    if nzS
+        array.push(zoneBoxes, box.new(bar_index, -zbSm, bar_index + zoneAge, -ztSm, border_color = color.new(color.maroon, 0), bgcolor = color.new(color.maroon, 80), text = znS, text_color = color.maroon, text_size = size.tiny))
+    f_capBoxes(zoneBoxes, maxObjs)
+
+if enableA and showStruct and barstate.isconfirmed
+    if bosL
+        array.push(sigLabels, label.new(bar_index, high, "BOS↑", style = label.style_label_down, color = color.new(color.teal, 30), textcolor = color.white, size = size.tiny))
+    if bosS
+        array.push(sigLabels, label.new(bar_index, low, "BOS↓", style = label.style_label_up, color = color.new(color.maroon, 30), textcolor = color.white, size = size.tiny))
+
+if longSig
+    array.push(sigLabels, label.new(bar_index, low, "BUY " + str.tostring(sigScore), style = label.style_label_up, color = color.green, textcolor = color.white, size = size.small))
+if shortSig
+    array.push(sigLabels, label.new(bar_index, high, "SELL " + str.tostring(sigScore), style = label.style_label_down, color = color.red, textcolor = color.white, size = size.small))
+f_capLabels(sigLabels, maxObjs * 2)
+
+if showLevels and (longSig or shortSig)
+    array.push(lvlLines, line.new(bar_index, sigEntry, bar_index + 20, sigEntry, color = color.gray, width = 1))
+    array.push(lvlLines, line.new(bar_index, sigSL, bar_index + 20, sigSL, color = color.red, width = 1, style = line.style_dashed))
+    array.push(lvlLines, line.new(bar_index, sigTP, bar_index + 20, sigTP, color = color.green, width = 1, style = line.style_dashed))
+    f_capLines(lvlLines, maxObjs * 3)
+
+plotshape(longSig, "BUY", shape.triangleup, location.belowbar, color.green, size = size.tiny)
+plotshape(shortSig, "SELL", shape.triangledown, location.abovebar, color.red, size = size.tiny)
+
+// ───────────────────────── Dashboard ─────────────────────────
+var table dash = table.new(position.top_right, 2, 7, bgcolor = color.new(#0f1115, 0), border_color = color.new(#2a2e39, 0), border_width = 1)
+var int lastBosDir = 0
+if bosL
+    lastBosDir := 1
+if bosS
+    lastBosDir := -1
+var int lastSig = 0
+if longSig
+    lastSig := 1
+if shortSig
+    lastSig := -1
+if showDash and barstate.islast
+    txtCol = color.new(#d1d4dc, 0)
+    table.cell(dash, 0, 0, "TWI Precision", text_color = color.new(#f0b90b, 0), text_size = size.small)
+    table.cell(dash, 1, 0, syminfo.ticker + " " + timeframe.period, text_color = txtCol, text_size = size.small)
+    table.cell(dash, 0, 1, "HTF trend", text_color = txtCol, text_size = size.small)
+    table.cell(dash, 1, 1, htfB > 0 ? "Bullish" : htfB < 0 ? "Bearish" : "Neutral", text_color = htfB > 0 ? color.lime : htfB < 0 ? color.red : color.gray, text_size = size.small)
+    table.cell(dash, 0, 2, "Structure", text_color = txtCol, text_size = size.small)
+    table.cell(dash, 1, 2, lastBosDir > 0 ? "Bull BOS" : lastBosDir < 0 ? "Bear BOS" : "—", text_color = txtCol, text_size = size.small)
+    table.cell(dash, 0, 3, "Zone", text_color = txtCol, text_size = size.small)
+    table.cell(dash, 1, 3, onL ? "Demand: " + znL : onS ? "Supply: " + znS : "None active", text_color = txtCol, text_size = size.small)
+    table.cell(dash, 0, 4, "Confirmation", text_color = txtCol, text_size = size.small)
+    table.cell(dash, 1, 4, onL or onS ? "Waiting retest + rejection" : "—", text_color = txtCol, text_size = size.small)
+    table.cell(dash, 0, 5, "Last score", text_color = txtCol, text_size = size.small)
+    table.cell(dash, 1, 5, str.tostring(sigScore) + " / 100 (min " + str.tostring(minScore) + ")", text_color = txtCol, text_size = size.small)
+    table.cell(dash, 0, 6, "Signal", text_color = txtCol, text_size = size.small)
+    table.cell(dash, 1, 6, lastSig > 0 ? "BUY" : lastSig < 0 ? "SELL" : "—", text_color = lastSig > 0 ? color.lime : lastSig < 0 ? color.red : color.gray, text_size = size.small)
+
+// ───────────────────────── Alerts ─────────────────────────
+alertcondition(longSig, "TWI-PS BUY", "TWI Precision Structure BUY on {{ticker}} {{interval}} at {{close}}")
+alertcondition(shortSig, "TWI-PS SELL", "TWI Precision Structure SELL on {{ticker}} {{interval}} at {{close}}")
+if longSig or shortSig
+    alert((longSig ? "BUY " : "SELL ") + syminfo.ticker + " entry " + str.tostring(sigEntry, format.mintick) + " SL " + str.tostring(sigSL, format.mintick) + " TP " + str.tostring(sigTP, format.mintick) + " score " + str.tostring(sigScore), alert.freq_once_per_bar_close)

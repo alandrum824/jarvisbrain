@@ -1,0 +1,210 @@
+//@version=6
+// =============================================================================
+// Liquidity Sweep Demand Zone (LS-DZ) v2 - UNVALIDATED
+// Rebuilt 2026-10-11 to match the @Prop-Firm-Trader diagram Adam sent (5m & 15m):
+//   LONG:  higher highs + higher lows -> a close breaks the last swing high (BOS)
+//          -> the higher-low candle that led to the break = DEMAND ZONE (only valid
+//          after the break) -> pullback builds a small range ABOVE the zone; its
+//          swing lows = sell-side LIQUIDITY -> price sweeps those lows and taps the
+//          zone -> ENTRY on the first close back above the range top (yellow line).
+//          Stop below the zone, target the high made after the break (or 2R).
+//   SHORT: exact mirror (lower lows + lower highs, supply zone, buy-side sweep).
+// Kill: close through the zone's far edge, 48 bars after the sweep with no entry,
+// or a new break replaces the setup. Confirmed pivots only -> no repaint.
+// Same rules as ls_demand_zone_research.py in the vault. Indicator only.
+// =============================================================================
+indicator("Liquidity Sweep Demand Zone", shorttitle="LS-DZ", overlay=true,
+     max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+P        = input.int(3, "Swing strength (bars each side)", minval=1, group="Structure")
+killBars = input.int(48, "Bars after the sweep to enter", minval=1, group="Entry")
+tpMode   = input.string("Peak", "Target", options=["Peak", "2R"], group="Entry",
+     tooltip="Peak = the high (low) made after the break; skipped if it is under 1R. 2R = fixed.")
+ext      = input.int(30, "Extend drawings (bars)", minval=5, group="Display")
+showBuy  = input.bool(true, "Buys", group="Display")
+showSell = input.bool(true, "Sells", group="Display")
+
+cBuy  = #089981
+cSell = #f23645
+cLiq  = color.orange
+cTrig = color.yellow
+
+// ── Swings ──────────────────────────────────────────────────────────────────
+ph = ta.pivothigh(high, P, P)
+pl = ta.pivotlow(low, P, P)
+hiP = ta.highest(high, P)[1]          // highs of the P bars before this one
+loP = ta.lowest(low, P)[1]
+
+var float lastPH = na
+var int   lastPHb = na
+var float plBeforePH = na             // swing low before the last swing high
+var bool  phUsed = true
+var float lastPL = na
+var int   lastPLb = na
+var float phBeforePL = na
+var bool  plUsed = true
+
+newPH = not na(ph)
+newPL = not na(pl)
+if newPH
+    plBeforePH := lastPL
+if newPL
+    phBeforePL := lastPH
+if newPH
+    lastPH := ph
+    lastPHb := bar_index - P
+    phUsed := false
+if newPL
+    lastPL := pl
+    lastPLb := bar_index - P
+    plUsed := false
+
+// ── Setup object ────────────────────────────────────────────────────────────
+type Setup
+    int   dir
+    int   bos
+    float zt          // zone near edge (top of demand / bottom of supply)
+    float zb          // zone far edge (stop side)
+    float peak
+    float liq
+    int   liqBar
+    float trig
+    int   sweep
+    bool  tap
+    box   bx
+    line  liqLn
+    line  trigLn
+
+var Setup sL = na
+var Setup sS = na
+
+newSetup(int d, int k) =>
+    float zt = d > 0 ? high[k] : low[k]
+    float zb = d > 0 ? low[k] : high[k]
+    color c = d > 0 ? cBuy : cSell
+    box b = box.new(bar_index - k, math.max(zt, zb), bar_index + ext, math.min(zt, zb),
+         border_color=c, bgcolor=color.new(c, 80), text=d > 0 ? "Demand Zone" : "Supply Zone",
+         text_color=color.new(c, 0), text_size=size.small, text_halign=text.align_right)
+    Setup.new(d, bar_index, zt, zb, d > 0 ? high : low, na, na, na, na, false, b, na, na)
+
+retire(Setup s, bool broken) =>
+    if not na(s)
+        if broken
+            box.set_bgcolor(s.bx, color.new(color.gray, 88))
+            box.set_border_color(s.bx, color.new(color.gray, 60))
+            box.set_text(s.bx, "")
+        box.set_right(s.bx, bar_index)
+        if not na(s.liqLn)
+            line.set_x2(s.liqLn, bar_index)
+        if not na(s.trigLn)
+            line.set_x2(s.trigLn, bar_index)
+
+// ── Break of structure -> new setup ─────────────────────────────────────────
+// BUY side: close above the last swing high; the lowest low since that high is the
+// higher low and must sit above the swing low before the high.
+if not na(lastPH) and not phUsed and close > lastPH
+    phUsed := true
+    if not na(plBeforePH) and bar_index > lastPHb + 1
+        int n = bar_index - lastPHb
+        int k = 0
+        for j = 0 to n
+            if low[j] < low[k]
+                k := j
+        if low[k] > plBeforePH and showBuy
+            retire(sL, true)
+            sL := newSetup(1, k)
+
+if not na(lastPL) and not plUsed and close < lastPL
+    plUsed := true
+    if not na(phBeforePL) and bar_index > lastPLb + 1
+        int n = bar_index - lastPLb
+        int k = 0
+        for j = 0 to n
+            if high[j] > high[k]
+                k := j
+        if high[k] < phBeforePL and showSell
+            retire(sS, true)
+            sS := newSetup(-1, k)
+
+// ── Advance a setup; returns true on an entry signal ────────────────────────
+step(Setup s, bool newOpp, float oppPx, int oppBar, float pkTrig) =>
+    bool sig = false
+    bool dead = false
+    int d = s.dir
+    // signed prices: for sells everything is mirrored so one set of rules serves both
+    float hi = d > 0 ? high : -low
+    float lo = d > 0 ? low : -high
+    float cl = d > 0 ? close : -close
+    float zt = d * s.zt
+    float zb = d * s.zb
+    if cl < zb
+        retire(s, true)
+        dead := true
+    else
+        if na(s.sweep)
+            s.peak := d > 0 ? math.max(s.peak, high) : math.min(s.peak, low)
+            if newOpp and oppBar > s.bos
+                float pn = d * oppPx
+                if pn > zt and (na(s.liq) or pn < s.liq)
+                    s.liq := pn
+                    s.liqBar := oppBar
+                    s.trig := pkTrig
+                    if not na(s.liqLn)
+                        line.delete(s.liqLn)
+                    s.liqLn := line.new(oppBar, oppPx, bar_index + ext, oppPx, color=cLiq, style=line.style_dashed)
+                else if not na(s.liq)
+                    s.trig := math.max(s.trig, d > 0 ? high[1] : -low[1])
+            else if not na(s.liq)
+                s.trig := math.max(s.trig, d > 0 ? high[1] : -low[1])
+            if not na(s.liq) and lo < s.liq
+                s.sweep := bar_index
+                float trigPx = d * s.trig
+                s.trigLn := line.new(bar_index, trigPx, bar_index + ext, trigPx, color=cTrig, style=line.style_dashed)
+                label.new(bar_index, d * s.liq, "Sweep", style=d > 0 ? label.style_label_up : label.style_label_down,
+                     color=color.new(color.gray, 100), textcolor=color.gray, size=size.small)
+        if not na(s.sweep)
+            if bar_index - s.sweep > killBars
+                retire(s, false)
+                dead := true
+            else
+                if lo <= zt
+                    s.tap := true
+                if s.tap and cl > s.trig
+                    float risk = d * (close - s.zb)
+                    float tp = tpMode == "2R" ? close + d * 2 * risk : s.peak
+                    if risk > 0 and d * (tp - close) >= risk
+                        sig := true
+                        color c = d > 0 ? cBuy : cSell
+                        label.new(bar_index, d > 0 ? low : high, d > 0 ? "BUY" : "SELL",
+                             style=d > 0 ? label.style_label_up : label.style_label_down,
+                             color=c, textcolor=color.white, size=size.small)
+                        line.new(bar_index, s.zb, bar_index + ext, s.zb, color=cSell, width=2)
+                        line.new(bar_index, tp, bar_index + ext, tp, color=cBuy, width=2)
+                        label.new(bar_index + ext, s.zb, "SL", style=label.style_none, textcolor=cSell, size=size.tiny)
+                        label.new(bar_index + ext, tp, "TP", style=label.style_none, textcolor=cBuy, size=size.tiny)
+                    retire(s, false)
+                    dead := true
+        if not dead
+            box.set_right(s.bx, bar_index + ext)
+            if not na(s.liqLn)
+                line.set_x2(s.liqLn, bar_index + ext)
+            if not na(s.trigLn)
+                line.set_x2(s.trigLn, bar_index + ext)
+    [sig, dead]
+
+longSig = false
+shortSig = false
+if not na(sL) and bar_index > sL.bos
+    [sg, dd] = step(sL, newPL, pl, bar_index - P, hiP)
+    longSig := sg
+    if dd
+        sL := na
+if not na(sS) and bar_index > sS.bos
+    [sg, dd] = step(sS, newPH, ph, bar_index - P, -loP)
+    shortSig := sg
+    if dd
+        sS := na
+
+alertcondition(longSig,  title="LS-DZ Buy",  message="LS-DZ: sweep into demand + close above the range - BUY")
+alertcondition(shortSig, title="LS-DZ Sell", message="LS-DZ: sweep into supply + close below the range - SELL")

@@ -48,6 +48,21 @@ This session runs on a different machine (`C:\Users\Administrator`) than where t
 
 **Action taken:** cloned all 5 repos fresh to this machine (`~/fullstack-agent`, `~/ai-memory-vault`, `~/backtalk`, `~/ai-visualizer`, `~/barehands`) — clone only, Adam's explicit call, no installer run. All landed at the current tip (`5bb159f` / `659bba9` / `84b3a6c` / `6921e1d` / `eb23bed`, all 2026-08-30). This machine still only runs the brain/vault side — backtalk (voice) and ai-visualizer (face) are cloned but not wired up or running here, same "cloned but dormant" status the 2026-08-20 table recorded on the old machine.
 
+## Update: 2026-10-09 (Mark-LV comparison + barehands check, on the desktop's `aland` user profile)
+**UPDATED same night (Adam: "Jared stack only"):** all 5 pulled to upstream tip: fullstack-agent `5bb159f`, ai-memory-vault `659bba9`, backtalk `84b3a6c`, ai-visualizer `6921e1d`, barehands `eb23bed`. The four clean repos fast-forwarded. barehands was stashed → pulled → popped with no conflicts; the custom chat box (8779) and VOID_LINES survived. Configs backed up to `~/stack-backup-20261009/` first. No new config keys were needed (backtalk.json keeps its own extra keys `barehands_state_dir`, `extra_dirs`, `greeting`). barehands was re-tested after the update: tracker heartbeat, add_card 204, bad action 400, `bin/board.sh` 204, 0 errors. Reminder: backtalk/ai-visualizer are still cloned-but-not-active here (Adam's live voice is [[voice-line]]), so their updates don't change what he hears or sees. Was behind by: fullstack-agent 14, backtalk 21, ai-visualizer 10, barehands 14, ai-memory-vault 1. barehands' backlog included "add_card takes a position" (cards stop stacking), the folder pane opening over the ring, a Python-finder fix for the board tools, and a Windows `run.bat`. barehands still has local edits (`stage.html` chat box + void lines) and untracked `media/holo/*.glb`, so a pull needs the stash/merge care used on 08-18.
+
+**barehands verified working 2026-10-09.** Server started (`python server.py`, :8794). Headless Chrome with a fake camera: the hand tracker loaded in ~24 s, `add_card` → 204 and the card appeared in `/state`, a non-allowlisted action → 400, 0 console errors. Server stopped afterwards (it was not running before; the Desktop `Jarvis's Hands.bat` starts it).
+
+**Mark-LV evaluated (github.com/FatihMakes/Mark-LV, 1.6k stars, CC BY-NC 4.0).** A standalone PyQt desktop assistant on the Gemini Live API (Gemini Flash brain, `long_term.json` memory, avatar HUD, wake word, push-to-talk, OS control: apps/files/browser/WhatsApp/power). **Verdict: don't install or switch.**
+- It replaces the whole stack rather than plugging into it: no Claude brain, no vault, no barehands, no MT5/Base44.
+- It hands broad computer control to a Gemini model with the API key in plaintext, which is against Adam's access ramp.
+- Ideas worth borrowing into voice-line, if wanted:
+  1. A UI-issued confirmation token for irreversible actions (the model can't forge it).
+  2. An undo journal for file and setting changes.
+  3. Audio devices picked by name and measured, not assumed (backtalk's mic-pinning-by-name already covers part of this; it's in the unpulled 21).
+  4. A self-echo guard.
+  5. Session resumption after a dropped connection.
+
 ## How to update, now that repos are cloned here
 
 Confirmed via `ai-memory-vault`/`fullstack-agent`'s own READMEs (2026-09-14): on Windows there's no `update.bat` step for the agent to run — the documented flow is Adam just says **"update everything and tell me what changed"** and the agent does real `git -C <repo> pull --ff-only` on each clone and reports the changelog. Now that all 5 are actually cloned on this machine (see the 2026-09-14 update above), that's a straight local `git pull` per repo — no need to fall back on the GitHub API workaround used today (that workaround was only needed because the clones didn't exist here yet).
