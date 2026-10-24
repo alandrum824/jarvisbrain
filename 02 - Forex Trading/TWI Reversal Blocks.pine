@@ -1,30 +1,54 @@
 //@version=6
-// TWI Reversal Blocks - a swept high (low) that price rejects becomes a block that should hold; the first tap back in is the reversal.
-// Old high: a confirmed swing high (N candles each side) = liquidity, until price trades through it.
-// Sweep: a new swing high whose up-leg (from the last swing low) traded through an old high formed before that leg.
-// Rejection: price closes below the low the up-leg started from, without trading back above the sweep high first.
-//   A pullback that just continues higher draws nothing ("no point to mark that area").
-// Block: sweep high down to the swept old high, or to the sweep candle's body top if that is lower. Buys mirror on swept lows.
-// Tap: the first touch back into a confirmed block (circle + alert). Broken: a close through the far side greys it out.
-indicator("TWI Reversal Blocks", shorttitle = "TWI-RB", overlay = true, max_boxes_count = 200, max_labels_count = 50)
+// TWI Reversal Blocks v3 - protected liquidity zones + third-return watch. Visual only: it marks zones, Adam decides the trade.
+// EXTERNAL sweep (makes the zone): a swing high whose up-leg trades through an ESTABLISHED swing high (liquidity, N candles each
+//   side), then a close X ATR below the sweep high and (optional) a close below the leg start, before the sweep high is taken.
+//   Zones come from the zone timeframe (default 15m, closed candles only) and are drawn on the chart; chart-timeframe zones optional.
+// INTERNAL sweep (Adam's entry, never a zone; a sweep under a live protected high is not turned into a new zone): after a zone confirms, the first swing high that forms below the protected high
+//   near the zone = internal high (dotted). Price must then sell off (the fake run) and come back to it: a faint diamond + alert,
+//   on approach, no candle close needed. A sweep of the internal high does not matter; only a close above the protected high ends the zone.
+// No repaint: zones use closed candles only, are created once and frozen, and end only on a close through or on expiry. Buys mirror.
+indicator("TWI Reversal Blocks", shorttitle = "TWI-RB", overlay = true, max_boxes_count = 200, max_lines_count = 500, max_labels_count = 50)
 
 // ───────────────────────── Inputs ─────────────────────────
-grpS = "Swings"
-swLen   = input.int(5, "Swing length (candles each side)", minval = 2, maxval = 30, group = grpS)
-maxWait = input.int(100, "Bars allowed for the rejection", minval = 10, maxval = 500, group = grpS)
+grpS = "External sweep (makes the zone)"
+zoneTf  = input.timeframe("15", "Zone timeframe", group = grpS, tooltip = "Zones are built from closed candles of this timeframe. On a chart at or above it, the chart timeframe is used.")
+swLen   = input.int(5, "Sweep sensitivity (swing length)", minval = 2, maxval = 30, group = grpS)
+liqLen  = input.int(5, "Established high/low strength (candles each side)", minval = 2, maxval = 50, group = grpS)
+dispATR = input.float(1.5, "Displacement strength (ATR)", minval = 0.0, step = 0.1, group = grpS)
+needBOS = input.bool(true, "Require structure break (close beyond the leg start)", group = grpS)
+maxWait = input.int(100, "Candles allowed for confirmation", minval = 10, maxval = 500, group = grpS)
+atrLen  = input.int(14, "ATR length", minval = 1, group = grpS)
+
+grpZ = "Zones"
+edgeMode   = input.string("Swept level or body (wider)", "Zone far edge", options = ["Swept level or body (wider)", "Sweep candle body", "Swept level", "Origin candle"], group = grpZ, tooltip = "Origin candle = the last up candle (down candle for buy zones) at or before the sweep.")
+overlapPct = input.int(20, "Overlap that counts as the same zone (%)", minval = 0, maxval = 100, group = grpZ)
+lifeHrs    = input.int(48, "Zone lifespan (hours, 0 = until broken)", minval = 0, group = grpZ)
+keepN      = input.int(3, "Max zones per side", minval = 1, maxval = 20, group = grpZ)
+internalSkip = input.bool(true, "Sweeps under a live zone are internal (no new zone)", group = grpZ, tooltip = "A sweep whose extreme stays under a live protected high (above a live protected low), inside or within the internal-high distance of the zone, is the internal sweep of that zone: Adam's entry event, not a new protected zone.")
+showLtf    = input.bool(false, "Also show chart-timeframe zones (dashed)", group = grpZ)
+keepLtfN   = input.int(2, "Max chart-timeframe zones per side", minval = 1, maxval = 20, group = grpZ)
+tz         = input.string("America/Los_Angeles", "Time zone for the confirmation time", group = grpZ)
+
+grpW = "Internal sweep: third-return watch (entry idea, not a zone)"
+showWatch = input.bool(true, "Track the internal high and the third return", group = grpW)
+ihLen     = input.int(3, "Internal swing length", minval = 1, maxval = 10, group = grpW)
+retATR    = input.float(1.5, "Internal high must form within (ATR below the zone)", minval = 0.0, step = 0.1, group = grpW)
+awayATR   = input.float(1.0, "Fake run: drop below the internal high (ATR)", minval = 0.0, step = 0.1, group = grpW)
+nearATR   = input.float(0.25, "Watch fires within (ATR of the internal high)", minval = 0.0, step = 0.05, group = grpW)
 
 grpD = "Display"
-keepN      = input.int(3, "Blocks shown per side", minval = 1, maxval = 20, group = grpD)
-showTag    = input.bool(true, "Show 'no reason to get taken' tag", group = grpD)
-showBroken = input.bool(true, "Keep broken blocks (grey)", group = grpD)
-colBear    = input.color(color.new(#4a7bd6, 80), "Sell block", group = grpD)
-colBull    = input.color(color.new(#26a69a, 80), "Buy block", group = grpD)
-colDead    = input.color(color.new(color.gray, 88), "Broken block", group = grpD)
+showSwept = input.bool(true, "Mark the swept high/low (dotted)", group = grpD)
+showSweep = input.bool(true, "Mark the sweep wick", group = grpD)
+showConf  = input.bool(true, "Mark the confirmation candle", group = grpD)
+showTag   = input.bool(true, "Show 'no reason to get taken' tag", group = grpD)
+colBear   = input.color(color.new(#4a7bd6, 80), "Sell zone", group = grpD)
+colBull   = input.color(color.new(#26a69a, 80), "Buy zone", group = grpD)
 
 // ───────────────────────── Types ─────────────────────────
 type Liq
     float price
     int   bar
+    int   t
     int   sweptBar = na
 
 type Piv
@@ -32,39 +56,31 @@ type Piv
     int   bar
 
 type Pend
-    float top
-    float bot
+    float far
+    float near
     float trig
-    int   pivBar
+    int   pivT
     int   bornBar
+    float oldP
+    int   oldT
+    float atrAt
+    float ext
+    bool  bos
 
-type Block
+type Zone
     box   bx
     float top
     float bot
-    bool  tapped = false
     int   conf
+    int   confT
+    line  lSwept
+    line  lSweep
+    line  lConf
+    line  lInt
+    float ih
+    int   phase = 0
 
-var array<Liq>   hiLiq   = array.new<Liq>()
-var array<Liq>   loLiq   = array.new<Liq>()
-var array<Piv>   hiPivs  = array.new<Piv>()
-var array<Piv>   loPivs  = array.new<Piv>()
-var array<Pend>  bearPend = array.new<Pend>()
-var array<Pend>  bullPend = array.new<Pend>()
-var array<Block> bearBlk = array.new<Block>()
-var array<Block> bullBlk = array.new<Block>()
-var array<box>   deadBox = array.new<box>()
-
-// ───────────────────────── Series read every bar ─────────────────────────
-ph       = ta.pivothigh(high, swLen, swLen)
-pl       = ta.pivotlow(low, swLen, swLen)
-bodyTopP = math.max(open[swLen], close[swLen])
-bodyBotP = math.min(open[swLen], close[swLen])
-lowCl    = ta.lowest(close, swLen)
-highCl   = ta.highest(close, swLen)
-pb       = bar_index - swLen
-
-// ───────────────────────── Helpers ─────────────────────────
+// ───────────────────────── Zone engine (pure: no drawings, runs on any timeframe) ─────────────────────────
 markSweeps(array<Liq> liqs, bool isHigh) =>
     if liqs.size() > 0
         for i = 0 to liqs.size() - 1
@@ -75,7 +91,6 @@ markSweeps(array<Liq> liqs, bool isHigh) =>
         liqs.shift()
     true
 
-// Latest opposite pivot before the sweep pivot = where its leg started.
 legStart(array<Piv> pivs, int before) =>
     Piv found = na
     if pivs.size() > 0
@@ -86,110 +101,263 @@ legStart(array<Piv> pivs, int before) =>
                 break
     found
 
-// Best swept old level: formed before the leg, swept during it, beyond which the sweep pivot went.
-sweptLevel(array<Liq> liqs, int legBar, float pivPrice, bool isHigh) =>
-    float best = na
+// Most extreme established level formed before the leg, swept during it, and beyond which the sweep pivot went.
+sweptLevel(array<Liq> liqs, int legBar, float pivPrice, bool isHigh, int pb) =>
+    Liq best = na
     if liqs.size() > 0
         for i = 0 to liqs.size() - 1
             l = liqs.get(i)
             if not na(l.sweptBar) and l.bar < legBar and l.sweptBar > legBar and l.sweptBar <= pb
                 ok = isHigh ? l.price < pivPrice : l.price > pivPrice
-                if ok and (na(best) or (isHigh ? l.price > best : l.price < best))
-                    best := l.price
+                if ok and (na(best) or (isHigh ? l.price > best.price : l.price < best.price))
+                    best := l
     best
 
-retire(Block b) =>
-    b.bx.set_right(bar_index)
-    if showBroken
-        b.bx.set_bgcolor(colDead)
-        b.bx.set_border_color(color.new(color.gray, 70))
-        b.bx.set_text_color(color.new(color.gray, 40))
-        deadBox.push(b.bx)
-        while deadBox.size() > keepN * 2
-            deadBox.shift().delete()
-    else
-        b.bx.delete()
-    true
-
-addBlock(array<Block> blks, Pend p, bool isBear) =>
-    col = isBear ? colBear : colBull
-    tag = showTag ? (isBear ? "No reason for this high to get taken" : "No reason for this low to get taken") : ""
-    bx = box.new(p.pivBar, p.top, bar_index + 3, p.bot, border_color = color.new(col, 40), bgcolor = col,
-         text = tag, text_size = size.tiny, text_color = color.new(col, 0), text_halign = text.align_right,
-         text_valign = isBear ? text.align_top : text.align_bottom)
-    blks.push(Block.new(bx, p.top, p.bot, false, bar_index))
-    while blks.size() > keepN
-        blks.shift().bx.delete()
-    true
-
-// Pending sweeps: cancelled if price goes beyond the sweep extreme, confirmed on a close beyond the leg start.
-runPending(array<Pend> pend, array<Block> blks, bool isBear) =>
+// Confirms pending sweeps; returns the most extreme zone confirmed on this candle.
+runPending(array<Pend> pend, bool isBear) =>
+    bool  made = false
+    float zTop = na
+    float zBot = na
+    int   zS   = na
+    float zO   = na
+    int   zOT  = na
     if pend.size() > 0
         for i = pend.size() - 1 to 0
             p = pend.get(i)
             first = bar_index == p.bornBar
-            beyond = not first and (isBear ? high > p.top : low < p.bot)
-            rejected = isBear ? (first ? lowCl < p.trig : close < p.trig) : (first ? highCl > p.trig : close > p.trig)
+            beyond = not first and (isBear ? high > p.far : low < p.far)
+            if not first
+                p.ext := isBear ? math.min(p.ext, close) : math.max(p.ext, close)
+                p.bos := p.bos or (isBear ? close < p.trig : close > p.trig)
+            dispOk = (isBear ? p.far - p.ext : p.ext - p.far) >= dispATR * p.atrAt
             if beyond or bar_index - p.bornBar > maxWait
                 pend.remove(i)
-            else if rejected
-                addBlock(blks, p, isBear)
+            else if dispOk and (p.bos or not needBOS)
+                t = isBear ? p.far : p.near
+                b = isBear ? p.near : p.far
+                if t > b and (not made or (isBear ? t > zTop : b < zBot))
+                    made := true
+                    zTop := t
+                    zBot := b
+                    zS := p.pivT
+                    zO := p.oldP
+                    zOT := p.oldT
                 pend.remove(i)
+    [made, zTop, zBot, zS, zO, zOT]
+
+zoneEngine() =>
+    var array<Liq>  hiLiq    = array.new<Liq>()
+    var array<Liq>  loLiq    = array.new<Liq>()
+    var array<Piv>  hiPivs   = array.new<Piv>()
+    var array<Piv>  loPivs   = array.new<Piv>()
+    var array<Pend> bearPend = array.new<Pend>()
+    var array<Pend> bullPend = array.new<Pend>()
+    ph   = ta.pivothigh(high, swLen, swLen)
+    pl   = ta.pivotlow(low, swLen, swLen)
+    lph  = ta.pivothigh(high, liqLen, liqLen)
+    lpl  = ta.pivotlow(low, liqLen, liqLen)
+    atrP = ta.atr(atrLen)[swLen]
+    bTop = math.max(open[swLen], close[swLen])
+    bBot = math.min(open[swLen], close[swLen])
+    loC  = ta.lowest(close, swLen)
+    hiC  = ta.highest(close, swLen)
+    pb   = bar_index - swLen
+    pt   = time[swLen]
+    float oBear = bTop
+    float oBull = bBot
+    if edgeMode == "Origin candle"
+        if not na(ph)
+            for k = swLen to swLen + 10
+                if close[k] > open[k]
+                    oBear := low[k]
+                    break
+        if not na(pl)
+            for k = swLen to swLen + 10
+                if close[k] < open[k]
+                    oBull := high[k]
+                    break
+    markSweeps(hiLiq, true)
+    markSweeps(loLiq, false)
+    if not na(ph)
+        leg = legStart(loPivs, pb)
+        if not na(leg)
+            old = sweptLevel(hiLiq, leg.bar, ph, true, pb)
+            if not na(old)
+                float near = switch edgeMode
+                    "Sweep candle body" => bTop
+                    "Swept level"       => old.price
+                    "Origin candle"     => oBear
+                    => math.min(old.price, bTop)
+                bearPend.push(Pend.new(ph, near, leg.price, pt, bar_index, old.price, old.t, atrP, loC, loC < leg.price))
+        hiPivs.push(Piv.new(ph, pb))
+        if hiPivs.size() > 20
+            hiPivs.shift()
+    if not na(pl)
+        leg = legStart(hiPivs, pb)
+        if not na(leg)
+            old = sweptLevel(loLiq, leg.bar, pl, false, pb)
+            if not na(old)
+                float near = switch edgeMode
+                    "Sweep candle body" => bBot
+                    "Swept level"       => old.price
+                    "Origin candle"     => oBull
+                    => math.max(old.price, bBot)
+                bullPend.push(Pend.new(pl, near, leg.price, pt, bar_index, old.price, old.t, atrP, hiC, hiC > leg.price))
+        loPivs.push(Piv.new(pl, pb))
+        if loPivs.size() > 20
+            loPivs.shift()
+    // Liquidity is added after the sweep check, so a level can only be swept by a later leg.
+    if not na(lph)
+        hiLiq.push(Liq.new(lph, bar_index - liqLen, time[liqLen]))
+    if not na(lpl)
+        loLiq.push(Liq.new(lpl, bar_index - liqLen, time[liqLen]))
+    [bN, bT, bB, bS, bO, bOT] = runPending(bearPend, true)
+    [uN, uT, uB, uS, uO, uOT] = runPending(bullPend, false)
+    [bN, bT, bB, bS, bO, bOT, uN, uT, uB, uS, uO, uOT]
+
+// Zone timeframe, closed candles only: shift by one candle and look ahead to it, so nothing changes once printed.
+zoneEngineClosed() =>
+    [bN, bT, bB, bS, bO, bOT, uN, uT, uB, uS, uO, uOT] = zoneEngine()
+    [bN[1], bT[1], bB[1], bS[1], bO[1], bOT[1], uN[1], uT[1], uB[1], uS[1], uO[1], uOT[1]]
+
+useHtf = timeframe.in_seconds() < timeframe.in_seconds(zoneTf)
+reqTf  = useHtf ? zoneTf : timeframe.period
+[hbN, hbT, hbB, hbS, hbO, hbOT, huN, huT, huB, huS, huO, huOT] = request.security(syminfo.tickerid, reqTf, zoneEngineClosed(), lookahead = barmerge.lookahead_on)
+[lbN, lbT, lbB, lbS, lbO, lbOT, luN, luT, luB, luS, luO, luOT] = zoneEngine()
+
+// ───────────────────────── Chart-side state ─────────────────────────
+var array<Zone> zBear = array.new<Zone>()
+var array<Zone> zBull = array.new<Zone>()
+var array<Zone> lBear = array.new<Zone>()
+var array<Zone> lBull = array.new<Zone>()
+
+atrC     = ta.atr(atrLen)
+ihHi     = ta.pivothigh(high, ihLen, ihLen)
+ihLo     = ta.pivotlow(low, ihLen, ihLen)
+lowSince = ta.lowest(low, ihLen)
+hiSince  = ta.highest(high, ihLen)
+ihT      = time[ihLen]
+ihBar    = bar_index - ihLen
+zoneSec  = timeframe.in_seconds(reqTf)
+barMs    = timeframe.in_seconds() * 1000
+
+kill(Zone z) =>
+    z.bx.delete()
+    if not na(z.lSwept)
+        z.lSwept.delete()
+    if not na(z.lSweep)
+        z.lSweep.delete()
+    if not na(z.lConf)
+        z.lConf.delete()
+    if not na(z.lInt)
+        z.lInt.delete()
     true
 
-// Live blocks: extend, flag the first tap, retire on a close through the far side.
-runBlocks(array<Block> blks, bool isBear) =>
-    bool tapNow = false
-    if blks.size() > 0
-        for i = blks.size() - 1 to 0
-            b = blks.get(i)
-            if bar_index > b.conf
-                broken = isBear ? close > b.top : close < b.bot
-                if broken
-                    retire(b)
-                    blks.remove(i)
+// One zone per area: an overlapping live zone with a less extreme sweep is replaced; a more extreme one blocks the new zone.
+addZone(array<Zone> zs, array<Zone> parents, bool isBear, bool primary, float top, float bot, int sweepT, float oldP, int oldT, int keep, int srcSec) =>
+    bool skip = not (top > bot)
+    // Internal sweep of a live zone (stays under its protected extreme, inside or near it): not a new zone.
+    if not skip and internalSkip and parents.size() > 0
+        for i = 0 to parents.size() - 1
+            z = parents.get(i)
+            if isBear ? top < z.top and top >= z.bot - retATR * atrC : bot > z.bot and bot <= z.top + retATR * atrC
+                skip := true
+    if not skip and zs.size() > 0
+        for i = zs.size() - 1 to 0
+            z = zs.get(i)
+            ov = math.min(top, z.top) - math.max(bot, z.bot)
+            h  = math.min(top - bot, z.top - z.bot)
+            if h > 0 and ov / h >= overlapPct / 100.0
+                if isBear ? top > z.top : bot < z.bot
+                    kill(z)
+                    zs.remove(i)
                 else
-                    b.bx.set_right(bar_index + 3)
-                    touched = isBear ? high >= b.bot : low <= b.top
-                    if touched and not b.tapped
-                        b.tapped := true
-                        tapNow := true
-    tapNow
+                    skip := true
+    if not skip
+        col  = isBear ? colBear : colBull
+        lc   = color.new(col, primary ? 0 : 30)
+        fill = primary ? col : color.new(col, 92)
+        conf = " · conf " + str.format_time(time, "MM-dd HH:mm", tz)
+        tag  = primary ? ((showTag ? (isBear ? "No reason for this high to get taken" : "No reason for this low to get taken") : "") + conf) : (timeframe.period + conf)
+        half = srcSec * 1000
+        bx = box.new(sweepT, top, time + 3 * barMs, bot, xloc = xloc.bar_time, border_color = color.new(col, primary ? 40 : 55),
+             border_style = primary ? line.style_solid : line.style_dashed, bgcolor = fill, text = tag, text_size = size.tiny,
+             text_color = lc, text_halign = text.align_right, text_valign = isBear ? text.align_top : text.align_bottom)
+        far = isBear ? top : bot
+        l1 = showSwept ? line.new(oldT, oldP, sweepT, oldP, xloc = xloc.bar_time, color = lc, style = line.style_dotted) : na
+        l2 = showSweep ? line.new(sweepT - half, far, sweepT + half, far, xloc = xloc.bar_time, color = lc, width = 3) : na
+        l3 = showConf ? line.new(time, top, time, bot, xloc = xloc.bar_time, color = lc, style = line.style_dotted) : na
+        zs.push(Zone.new(bx, top, bot, bar_index, time, l1, l2, l3, na, na, 0))
+        while zs.size() > keep
+            kill(zs.shift())
+    not skip
 
-// ───────────────────────── Engine ─────────────────────────
-markSweeps(hiLiq, true)
-markSweeps(loLiq, false)
+// Live zones: freeze, extend, run the third-return watch; end only on a closed candle through the protected extreme or on expiry.
+runZones(array<Zone> zs, bool isBear) =>
+    bool fired = false
+    if zs.size() > 0
+        for i = zs.size() - 1 to 0
+            z = zs.get(i)
+            if bar_index > z.conf
+                broken  = barstate.isconfirmed and (isBear ? close > z.top : close < z.bot)
+                expired = lifeHrs > 0 and time - z.confT > lifeHrs * 3600000
+                if broken or expired
+                    kill(z)
+                    zs.remove(i)
+                    continue
+                z.bx.set_right(time + 3 * barMs)
+                if showWatch
+                    lc = color.new(isBear ? colBear : colBull, 0)
+                    piv = isBear ? ihHi : ihLo
+                    // Stage 2: the first swing after confirmation that forms inside or near the zone, short of the protected extreme.
+                    if z.phase == 0 and not na(piv) and ihBar > z.conf
+                        nearZone = isBear ? piv < z.top and piv >= z.bot - retATR * atrC : piv > z.bot and piv <= z.top + retATR * atrC
+                        if nearZone
+                            z.ih := piv
+                            z.phase := 1
+                            z.lInt := line.new(ihT, piv, time + 3 * barMs, piv, xloc = xloc.bar_time, color = lc, style = line.style_dotted, width = 1)
+                            ranAway = isBear ? lowSince <= piv - awayATR * atrC : hiSince >= piv + awayATR * atrC
+                            if ranAway
+                                z.phase := 2
+                    else if z.phase == 1 and barstate.isconfirmed
+                        if isBear ? low <= z.ih - awayATR * atrC : high >= z.ih + awayATR * atrC
+                            z.phase := 2
+                    else if z.phase == 2
+                        // Stage 3: the return. Approaching or matching the internal high is enough; a sweep of it is fine.
+                        if isBear ? high >= z.ih - nearATR * atrC : low <= z.ih + nearATR * atrC
+                            fired := true
+                            z.phase := 3
+                    if not na(z.lInt)
+                        z.lInt.set_x2(time + 3 * barMs)
+    fired
 
-if not na(ph)
-    leg = legStart(loPivs, pb)
-    if not na(leg)
-        old = sweptLevel(hiLiq, leg.bar, ph, true)
-        if not na(old)
-            bearPend.push(Pend.new(ph, math.min(old, bodyTopP), leg.price, pb, bar_index))
-    hiLiq.push(Liq.new(ph, pb))
-    hiPivs.push(Piv.new(ph, pb))
-    if hiPivs.size() > 20
-        hiPivs.shift()
+// ───────────────────────── Engine on the chart ─────────────────────────
+var int lastHB = na
+var int lastHU = na
+newHB = hbN and (na(lastHB) or hbS != lastHB)
+newHU = huN and (na(lastHU) or huS != lastHU)
+if newHB
+    lastHB := hbS
+if newHU
+    lastHU := huS
 
-if not na(pl)
-    leg = legStart(hiPivs, pb)
-    if not na(leg)
-        old = sweptLevel(loLiq, leg.bar, pl, false)
-        if not na(old)
-            bullPend.push(Pend.new(math.max(old, bodyBotP), pl, leg.price, pb, bar_index))
-    loLiq.push(Liq.new(pl, pb))
-    loPivs.push(Piv.new(pl, pb))
-    if loPivs.size() > 20
-        loPivs.shift()
+madeHB = newHB ? addZone(zBear, zBear, true, true, hbT, hbB, hbS, hbO, hbOT, keepN, zoneSec) : false
+madeHU = newHU ? addZone(zBull, zBull, false, true, huT, huB, huS, huO, huOT, keepN, zoneSec) : false
+madeLB = showLtf and useHtf and lbN and barstate.isconfirmed ? addZone(lBear, zBear, true, false, lbT, lbB, lbS, lbO, lbOT, keepLtfN, timeframe.in_seconds()) : false
+madeLU = showLtf and useHtf and luN and barstate.isconfirmed ? addZone(lBull, zBull, false, false, luT, luB, luS, luO, luOT, keepLtfN, timeframe.in_seconds()) : false
 
-runPending(bearPend, bearBlk, true)
-runPending(bullPend, bullBlk, false)
-bearTap = runBlocks(bearBlk, true)
-bullTap = runBlocks(bullBlk, false)
+wBear = runZones(zBear, true)
+wBull = runZones(zBull, false)
+wLB   = runZones(lBear, true)
+wLU   = runZones(lBull, false)
+watchSell = wBear or wLB
+watchBuy  = wBull or wLU
 
-plotshape(bearTap, "Sell tap", shape.circle, location.abovebar, color.new(#4a7bd6, 0), size = size.small)
-plotshape(bullTap, "Buy tap", shape.circle, location.belowbar, color.new(#26a69a, 0), size = size.small)
+plotshape(watchSell, "Third-return watch (sell)", shape.diamond, location.abovebar, color.new(#4a7bd6, 45), size = size.tiny)
+plotshape(watchBuy, "Third-return watch (buy)", shape.diamond, location.belowbar, color.new(#26a69a, 45), size = size.tiny)
 
-alertcondition(bearTap, "Reversal Block Tap - sell", "{{ticker}} tapped a sell reversal block at {{close}}")
-alertcondition(bullTap, "Reversal Block Tap - buy", "{{ticker}} tapped a buy reversal block at {{close}}")
-alertcondition(bearTap or bullTap, "Reversal Block Tap - any", "{{ticker}} tapped a reversal block at {{close}}")
+// Notifications only.
+alertcondition(madeHB or madeHU, "New protected zone", "{{ticker}}: new protected zone confirmed at {{close}}")
+alertcondition(watchSell, "Third-return watch - sell", "{{ticker}}: price is back at the internal high under a protected high ({{close}})")
+alertcondition(watchBuy, "Third-return watch - buy", "{{ticker}}: price is back at the internal low above a protected low ({{close}})")
+alertcondition(watchSell or watchBuy, "Third-return watch - any", "{{ticker}}: third-return watch at {{close}}")
