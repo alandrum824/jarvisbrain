@@ -1,0 +1,195 @@
+//@version=6
+// TWI Reversal Blocks - a swept high (low) that price rejects becomes a block that should hold; the first tap back in is the reversal.
+// Old high: a confirmed swing high (N candles each side) = liquidity, until price trades through it.
+// Sweep: a new swing high whose up-leg (from the last swing low) traded through an old high formed before that leg.
+// Rejection: price closes below the low the up-leg started from, without trading back above the sweep high first.
+//   A pullback that just continues higher draws nothing ("no point to mark that area").
+// Block: sweep high down to the swept old high, or to the sweep candle's body top if that is lower. Buys mirror on swept lows.
+// Tap: the first touch back into a confirmed block (circle + alert). Broken: a close through the far side greys it out.
+indicator("TWI Reversal Blocks", shorttitle = "TWI-RB", overlay = true, max_boxes_count = 200, max_labels_count = 50)
+
+// ───────────────────────── Inputs ─────────────────────────
+grpS = "Swings"
+swLen   = input.int(5, "Swing length (candles each side)", minval = 2, maxval = 30, group = grpS)
+maxWait = input.int(100, "Bars allowed for the rejection", minval = 10, maxval = 500, group = grpS)
+
+grpD = "Display"
+keepN      = input.int(3, "Blocks shown per side", minval = 1, maxval = 20, group = grpD)
+showTag    = input.bool(true, "Show 'no reason to get taken' tag", group = grpD)
+showBroken = input.bool(true, "Keep broken blocks (grey)", group = grpD)
+colBear    = input.color(color.new(#4a7bd6, 80), "Sell block", group = grpD)
+colBull    = input.color(color.new(#26a69a, 80), "Buy block", group = grpD)
+colDead    = input.color(color.new(color.gray, 88), "Broken block", group = grpD)
+
+// ───────────────────────── Types ─────────────────────────
+type Liq
+    float price
+    int   bar
+    int   sweptBar = na
+
+type Piv
+    float price
+    int   bar
+
+type Pend
+    float top
+    float bot
+    float trig
+    int   pivBar
+    int   bornBar
+
+type Block
+    box   bx
+    float top
+    float bot
+    bool  tapped = false
+    int   conf
+
+var array<Liq>   hiLiq   = array.new<Liq>()
+var array<Liq>   loLiq   = array.new<Liq>()
+var array<Piv>   hiPivs  = array.new<Piv>()
+var array<Piv>   loPivs  = array.new<Piv>()
+var array<Pend>  bearPend = array.new<Pend>()
+var array<Pend>  bullPend = array.new<Pend>()
+var array<Block> bearBlk = array.new<Block>()
+var array<Block> bullBlk = array.new<Block>()
+var array<box>   deadBox = array.new<box>()
+
+// ───────────────────────── Series read every bar ─────────────────────────
+ph       = ta.pivothigh(high, swLen, swLen)
+pl       = ta.pivotlow(low, swLen, swLen)
+bodyTopP = math.max(open[swLen], close[swLen])
+bodyBotP = math.min(open[swLen], close[swLen])
+lowCl    = ta.lowest(close, swLen)
+highCl   = ta.highest(close, swLen)
+pb       = bar_index - swLen
+
+// ───────────────────────── Helpers ─────────────────────────
+markSweeps(array<Liq> liqs, bool isHigh) =>
+    if liqs.size() > 0
+        for i = 0 to liqs.size() - 1
+            l = liqs.get(i)
+            if na(l.sweptBar) and (isHigh ? high > l.price : low < l.price)
+                l.sweptBar := bar_index
+    while liqs.size() > 40
+        liqs.shift()
+    true
+
+// Latest opposite pivot before the sweep pivot = where its leg started.
+legStart(array<Piv> pivs, int before) =>
+    Piv found = na
+    if pivs.size() > 0
+        for i = pivs.size() - 1 to 0
+            p = pivs.get(i)
+            if p.bar < before
+                found := p
+                break
+    found
+
+// Best swept old level: formed before the leg, swept during it, beyond which the sweep pivot went.
+sweptLevel(array<Liq> liqs, int legBar, float pivPrice, bool isHigh) =>
+    float best = na
+    if liqs.size() > 0
+        for i = 0 to liqs.size() - 1
+            l = liqs.get(i)
+            if not na(l.sweptBar) and l.bar < legBar and l.sweptBar > legBar and l.sweptBar <= pb
+                ok = isHigh ? l.price < pivPrice : l.price > pivPrice
+                if ok and (na(best) or (isHigh ? l.price > best : l.price < best))
+                    best := l.price
+    best
+
+retire(Block b) =>
+    b.bx.set_right(bar_index)
+    if showBroken
+        b.bx.set_bgcolor(colDead)
+        b.bx.set_border_color(color.new(color.gray, 70))
+        b.bx.set_text_color(color.new(color.gray, 40))
+        deadBox.push(b.bx)
+        while deadBox.size() > keepN * 2
+            deadBox.shift().delete()
+    else
+        b.bx.delete()
+    true
+
+addBlock(array<Block> blks, Pend p, bool isBear) =>
+    col = isBear ? colBear : colBull
+    tag = showTag ? (isBear ? "No reason for this high to get taken" : "No reason for this low to get taken") : ""
+    bx = box.new(p.pivBar, p.top, bar_index + 3, p.bot, border_color = color.new(col, 40), bgcolor = col,
+         text = tag, text_size = size.tiny, text_color = color.new(col, 0), text_halign = text.align_right,
+         text_valign = isBear ? text.align_top : text.align_bottom)
+    blks.push(Block.new(bx, p.top, p.bot, false, bar_index))
+    while blks.size() > keepN
+        blks.shift().bx.delete()
+    true
+
+// Pending sweeps: cancelled if price goes beyond the sweep extreme, confirmed on a close beyond the leg start.
+runPending(array<Pend> pend, array<Block> blks, bool isBear) =>
+    if pend.size() > 0
+        for i = pend.size() - 1 to 0
+            p = pend.get(i)
+            first = bar_index == p.bornBar
+            beyond = not first and (isBear ? high > p.top : low < p.bot)
+            rejected = isBear ? (first ? lowCl < p.trig : close < p.trig) : (first ? highCl > p.trig : close > p.trig)
+            if beyond or bar_index - p.bornBar > maxWait
+                pend.remove(i)
+            else if rejected
+                addBlock(blks, p, isBear)
+                pend.remove(i)
+    true
+
+// Live blocks: extend, flag the first tap, retire on a close through the far side.
+runBlocks(array<Block> blks, bool isBear) =>
+    bool tapNow = false
+    if blks.size() > 0
+        for i = blks.size() - 1 to 0
+            b = blks.get(i)
+            if bar_index > b.conf
+                broken = isBear ? close > b.top : close < b.bot
+                if broken
+                    retire(b)
+                    blks.remove(i)
+                else
+                    b.bx.set_right(bar_index + 3)
+                    touched = isBear ? high >= b.bot : low <= b.top
+                    if touched and not b.tapped
+                        b.tapped := true
+                        tapNow := true
+    tapNow
+
+// ───────────────────────── Engine ─────────────────────────
+markSweeps(hiLiq, true)
+markSweeps(loLiq, false)
+
+if not na(ph)
+    leg = legStart(loPivs, pb)
+    if not na(leg)
+        old = sweptLevel(hiLiq, leg.bar, ph, true)
+        if not na(old)
+            bearPend.push(Pend.new(ph, math.min(old, bodyTopP), leg.price, pb, bar_index))
+    hiLiq.push(Liq.new(ph, pb))
+    hiPivs.push(Piv.new(ph, pb))
+    if hiPivs.size() > 20
+        hiPivs.shift()
+
+if not na(pl)
+    leg = legStart(hiPivs, pb)
+    if not na(leg)
+        old = sweptLevel(loLiq, leg.bar, pl, false)
+        if not na(old)
+            bullPend.push(Pend.new(math.max(old, bodyBotP), pl, leg.price, pb, bar_index))
+    loLiq.push(Liq.new(pl, pb))
+    loPivs.push(Piv.new(pl, pb))
+    if loPivs.size() > 20
+        loPivs.shift()
+
+runPending(bearPend, bearBlk, true)
+runPending(bullPend, bullBlk, false)
+bearTap = runBlocks(bearBlk, true)
+bullTap = runBlocks(bullBlk, false)
+
+plotshape(bearTap, "Sell tap", shape.circle, location.abovebar, color.new(#4a7bd6, 0), size = size.small)
+plotshape(bullTap, "Buy tap", shape.circle, location.belowbar, color.new(#26a69a, 0), size = size.small)
+
+alertcondition(bearTap, "Reversal Block Tap - sell", "{{ticker}} tapped a sell reversal block at {{close}}")
+alertcondition(bullTap, "Reversal Block Tap - buy", "{{ticker}} tapped a buy reversal block at {{close}}")
+alertcondition(bearTap or bullTap, "Reversal Block Tap - any", "{{ticker}} tapped a reversal block at {{close}}")

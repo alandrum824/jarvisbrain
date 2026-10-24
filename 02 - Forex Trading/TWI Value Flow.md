@@ -13,6 +13,8 @@ TradingView Pine v6 indicator built 2026-10-21 from a YouTube video Adam screens
 
 **v5.0 (~6:50 PM PT, Adam "Yes"):** the plan row moved from the bottom of the panel to right under the header. On the phone, TradingView's lightning button sat on the plan text. Compile 0/0, saved v5.0, read back in the new order.
 
+**Open bug (2026-10-22, seen on the XAUUSD 5m chart):** runtime error "Error on bar 5270: The requested historical offset (302) is beyond the historical buffer's limit (301)", `#main():240`. On 5m a trading day is ~288 bars, so looking back to the previous day's profile overruns the auto-sized 301-bar buffer. The indicator stops drawing on 5m; 30m is unaffected. Proposed fix (awaiting Adam's OK): add `max_bars_back = 2000` to the `indicator()` call.
+
 ## Rules (all inputs adjustable)
 - **Session profile:** each OANDA daily candle's bars, volume (tick volume) spread evenly across the rows each bar covers, 40 rows. POC = busiest row; value area = grow from the POC toward the busier neighbour until 70% of volume. Today's profile drawn as a histogram at the session start (blue = value area, gold = outside), with POC (red) and VAH/VAL lines.
 - **Staircase:** each finished day leaves a VAH–VAL box + POC line (last 5), tinted by its migration. The prior day's VAH/POC/VAL extend right as dashed lines labeled "prior VAH …".
